@@ -6,3 +6,5 @@ cinch
 sequel
 
 Tested on jruby
+
+The uno game can be found in ZbojeiJureq repository (uno_plugin.rb and related files)
