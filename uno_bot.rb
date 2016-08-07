@@ -74,7 +74,7 @@ $bot = Cinch::Bot.new do
       end
     end
 
-    if m.message =~  '^reload'
+    if m.message =~  /^reload/
       bot.reset_hand
       proxy.remove_game_state_flag 1
       proxy.remove_game_state_flag 2
