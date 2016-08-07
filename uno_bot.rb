@@ -95,7 +95,7 @@ $bot = Cinch::Bot.new do
         t = m.message.split(':')
         proxy.drawn_card(t[1])
         sleep(LAG_DELAY)
-        proxy.get_message_queue.each { |i| @bot.Channel(@bot.config.channels[0]).send i}
+        proxy.get_message_queue.each { |i| @bot.Channel($bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
       else
         while $last_acted_on_turn_message == $last_turn_message
@@ -105,7 +105,7 @@ $bot = Cinch::Bot.new do
         proxy.parse_hand(m.message)
         bot.play_by_value
         sleep(LAG_DELAY)
-        proxy.get_message_queue.each { |i| @bot.Channel(@bot.config.channels[0]).send i}
+        proxy.get_message_queue.each { |i| @bot.Channel($bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
       end
       #{ proxy.get_message_queue.each { |item| m.reply item } }
