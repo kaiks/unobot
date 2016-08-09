@@ -469,12 +469,15 @@ class Bot
       playable_after = cards_left.select { |card| card.plays_after? c }
       penalty_divisor = 1000000000 - 100000000 + rand(100000000)
       if c.figure == 'wild+4'
-        penalty_divisor = 1*(i+1)
-        penalty_divisor -= 0.5 if @proxy.tracker.adversaries[@proxy.tracker.adversaries.to_a[0][0]].card_count > 3
+        penalty_divisor = 1.05*(i+1)
+        penalty_divisor += 0.15
+        penalty_divisor -= 0.6 if @proxy.tracker.adversaries[@proxy.tracker.adversaries.to_a[0][0]].card_count > 3
+        penalty_divisor += 0.5 if @hand.select{|c| !c.special_card?}.count <= 1
         penalty_divisor += 0.45 if score[1] > 0.75
       elsif c.figure == 'wild'
-        penalty_divisor = 1.25*(i+1)
+        penalty_divisor = 1.10*(i+1)
         penalty_divisor -= 0.5 if @proxy.tracker.adversaries[@proxy.tracker.adversaries.to_a[0][0]].card_count > 3
+        penalty_divisor += 0.5 if @hand.select{|c| !c.special_card?}.count <= 1
         penalty_divisor += 0.45 if score[1] > 0.75
       elsif c.figure == '+2'
         if score[1] < 0.75
