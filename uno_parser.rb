@@ -8,13 +8,14 @@ WARWD = 2
 ONE_CARD = 4
 
 class UnoProxy
-  attr_accessor :bot
+  attr_accessor :bot, :active_player
   attr_reader :tracker
-  attr_reader :game_state, :lock
+  attr_reader :game_state, :lock, :card_history
 
   def initialize(bot = nil)
     @bot = bot
     @game_state = GAME_OFF
+    @previous_player = nil
     @active_player = nil
     @game_players = []
     @card_history = []
@@ -25,6 +26,7 @@ class UnoProxy
     @tracker = Tracker.new
     @stack_size = 0
     @first_draw = true
+    @double_play = false
   end
 
   def add_game_state_flag f
@@ -50,7 +52,6 @@ class UnoProxy
       @tracker.update(text, @stack_size)
       @stack_size = 0
     end
-
   end
 
   def parse_main(nick,text)
@@ -59,19 +60,25 @@ class UnoProxy
       case text
         when /must respond/
           add_game_state_flag WAR
+          @stack_size = /\(total ([0-9]+)/.match(text)[1].to_i
+          puts "Set stack size to #{@stack_size}"
+        when /Playing two cards/
+          puts "Double play detected" if $debug
+          @double_play = true
         when /Ok, created.*/
           #if text == "Ok, created 04U09N12O08! game on #kx, say 'jo' to join in" && host?
           @game_state = GAME_ON
           @not_started = false
           @first_draw = true
+          @previous_player = nil
+          @active_player = nil
+          @card_history = []
           #end
-        when /\(total/
-          @stack_size = /\(total ([0-9]+)/.match(text)[1]
         when /joins the game/
           nick = text.split[0]
           @tracker.new_adversary nick unless nick.include? $bot.nick
         when /has only/
-          @tracker.adversaries[text.split[0]].card_count = 4  unless text.include? $bot.nick
+          @tracker.adversaries[text.split[0]].card_count = 4 unless text.include? $bot.nick
         when /For a total of/
           #@game_state = GAME_OFF
           @not_started = true
@@ -79,6 +86,8 @@ class UnoProxy
           add_game_state_flag ONE_CARD unless text.include? $bot.nick
           @tracker.adversaries[text.split[1]].card_count = 2 unless text.include? $bot.nick
         when /.*Top card: .*/
+          @previous_player = @active_player
+          @active_player = /([a-z_\-\[\]\\^{}|`][a-z0-9_\-\[\]\\^{}|`]{1,15})'s/i.match(text)[1]
           if text.include? $bot.nick
             if !text.include? "#{$bot.nick} passes"
               $last_turn_message = Time.now
@@ -92,6 +101,8 @@ class UnoProxy
           card = parse_card_text(card_text)
 
           @card_history << card
+          @card_history << card if @double_play
+
           @top_card = card
 
           if @top_card.is_offensive?
@@ -104,21 +115,18 @@ class UnoProxy
 
           update_game_state(text)
 
-          if (!text.include? 'passes') && (text.include? $bot.nick)
-            #todo: double card plays calculation
-            #todo: multiple player tracking
-            #todo: skip tracking
-            #todo: bug 1 fix
+          if (@previous_player != $bot.nick && !text.include?('passes'))
             @tracker.stack.remove! @top_card
-            @tracker.adversaries[@tracker.adversaries.to_a[0][0]].plays @top_card
+            @tracker.stack.remove! @top_card if @double_play
+            #bot cards have been removed before!
+            @tracker.adversaries[@previous_player].plays @top_card, @double_play unless @previous_player.nil?
           end
 
           @bot.last_card = @top_card
+          #reset double play state
+          @double_play = false
+
           @lock = 0
-
-
-          #@active_player = text.match(/(.*)'s/)[1]
-          #@bot.ping @top_card if @active_player == @nick
         when /raws/
           update_game_state(text)
       end
@@ -127,6 +135,8 @@ class UnoProxy
         when /^\!uno$/
           @game_players = [nick] if @not_started
       end
+
+
     end
   end
 
