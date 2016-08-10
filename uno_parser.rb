@@ -11,6 +11,7 @@ class UnoProxy
   attr_accessor :bot, :active_player
   attr_reader :tracker
   attr_reader :game_state, :lock, :card_history
+  attr_reader :turn_counter
 
   def initialize(bot = nil)
     @bot = bot
@@ -27,6 +28,7 @@ class UnoProxy
     @stack_size = 0
     @first_draw = true
     @double_play = false
+    @turn_counter = 0
   end
 
   def add_game_state_flag f
@@ -67,12 +69,15 @@ class UnoProxy
           @double_play = true
         when /Ok, created.*/
           #if text == "Ok, created 04U09N12O08! game on #kx, say 'jo' to join in" && host?
+          #todo: extract this to a reset method
           @game_state = GAME_ON
           @not_started = false
           @first_draw = true
           @previous_player = nil
           @active_player = nil
+          @turn_counter = 0
           @card_history = []
+          @lock = 1
           #end
         when /joins the game/
           nick = text.split[0]
@@ -86,14 +91,17 @@ class UnoProxy
           add_game_state_flag ONE_CARD unless text.include? $bot.nick
           @tracker.adversaries[text.split[1]].card_count = 2 unless text.include? $bot.nick
         when /.*Top card: .*/
+          @lock = 1
           @previous_player = @active_player
+          @turn_counter += 1
+
           @active_player = /([a-z_\-\[\]\\^{}|`][a-z0-9_\-\[\]\\^{}|`]{1,15})'s/i.match(text)[1]
           if text.include? $bot.nick
             if !text.include? "#{$bot.nick} passes"
               $last_turn_message = Time.now
             end
           end
-          @lock = 1
+
           card_text_index = text.rindex(/\s/)
           card_text = text[card_text_index..65536]
 
