@@ -103,7 +103,7 @@ class Bot
         return play playable_cards[0]
       else
         @predefined_path = get_offensive_path
-        if @predefined_path.length > 0
+        if !@predefined_path.nil? && @predefined_path.length > 0
           return play_predefined_path
         end
       end
@@ -194,7 +194,7 @@ class Bot
   end
 
   def has_one_card_or_is_late_game?
-    game_has_state(ONE_CARD) || @proxy.tracker.adversaries.to_a[0][1].card_count <= @proxy.turn_counter/20
+    game_has_state(ONE_CARD) || @proxy.tracker.adversaries.to_a[0][1].card_count <= 1+@proxy.turn_counter/20
   end
 
   #Tries to find offensive path through skips or double reverses.
@@ -203,7 +203,7 @@ class Bot
   def get_offensive_path
     #Check if we have a chance to play offensive cards at all
     offensive_cards = @hand.select{|c| c.figure=='+2'}
-    return if offensive_cards.length == 0
+    return [] if offensive_cards.length == 0
     #First attempt: try to build a 0 turn path with skips
     skips = @hand.select{|c| c.figure=='skip'}
     start = skips.select{|c| c.plays_after? @last_card}
@@ -249,7 +249,7 @@ class Bot
 
     best_color = @hand.select{|c|!c.special_card?}.
         group_by{|c| c.color}.map{|k,v| [k,v.length]}.
-        max{|x,y| x[1]<=>y[1]}
+        max{|x,y| x[1]<=>y[1]}[0]
 
     best_color ||= Uno.random_color
   end
