@@ -79,7 +79,7 @@ class UnoCard
     @color = color if special_valid_card?
   end
   
-  def unset_wild_color(color)
+  def unset_wild_color
     @color = :wild if special_valid_card?
   end
 

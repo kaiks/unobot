@@ -46,6 +46,10 @@ class Tracker
     1.0 - (@stack.select{|c| c.special_card?}.length.to_f/stack_size)
   end
 
+  def change_from_wd4_probability color
+    1.0 - (@stack.select{|c| c.figure == 'wild+4' || c.figure=='reverse' && c.color==color}.length.to_f/stack_size)
+  end
+
   def color_change_probability card
     1.0 - (@stack.select{|c| (c.figure == card.figure && c.color != card.color) || c.special_card?}.length.to_f/stack_size)
   end

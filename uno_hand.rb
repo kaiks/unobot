@@ -26,7 +26,7 @@ class Hand < Array
 
   def reset_wilds
     self.each { |c|
-      unset_wild_color
+      c.unset_wild_color
     }
   end
 
@@ -85,4 +85,10 @@ class Hand < Array
     end
   end
 
+  def all_cards_same_color?
+    hand_colors = colors
+    hand_colors.delete(:wild)
+    hand_colors.size < 2
+  end
+  
 end
