@@ -532,6 +532,7 @@ class Bot
   def special_card_penalty(cards, score)
     len = cards.length
     penalty_divisor = 1000000000
+    adversary = @proxy.tracker.adversaries[@proxy.tracker.adversaries.to_a[0][0]]
 
     cards.each_with_index { |c, i|
       cards_left = cards.drop(i+1)
@@ -541,13 +542,20 @@ class Bot
       if c.figure == 'wild+4'
         penalty_divisor = 1.05*(i+1)
         penalty_divisor += 0.15
-        penalty_divisor -= 0.6 if @proxy.tracker.adversaries[@proxy.tracker.adversaries.to_a[0][0]].card_count > 3
+        penalty_divisor -= 0.6 if adversary.card_count > 3
         penalty_divisor += 0.5 if @hand.select{|c| !c.special_card?}.count <= 1
         penalty_divisor += 0.45 if score[1] > 0.75
       elsif c.figure == 'wild'
         penalty_divisor = 1.10*(i+1)
-        penalty_divisor -= 0.5 if @proxy.tracker.adversaries[@proxy.tracker.adversaries.to_a[0][0]].card_count > 3
-        penalty_divisor += 0.5 if @hand.select{|c| !c.special_card?}.count <= 1
+        cards_special = (cards.drop(i)).group_by{|c| c.special_card?}
+        wild_count      = cards_special.fetch(true,[]).length
+        non_wild_count  = cards_special.fetch(false,[]).length
+        color_count     = cards_special.fetch(false,[]).map{|c|c.color}.uniq.length
+
+        penalty_divisor += 0.5+0.1*wild_count if wild_count >= color_count && non_wild_count <= 2*wild_count && @hand.length < adversary.card_count
+        penalty_divisor -= 0.5 if adversary.card_count > 3
+        penalty_divisor += 0.5 if non_wild_count <= 1
+
         penalty_divisor += 0.45 if score[1] > 0.75
       elsif c.figure == '+2'
         if score[1] < 0.75
