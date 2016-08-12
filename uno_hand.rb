@@ -56,21 +56,46 @@ class Hand < Array
     delete_at(index(card) || length)
   end
 
+  def select &block
+    return Hand.new(super.select { block } )
+  end
+
   def playable_after card
     select{ |x| x.plays_after? card }
+  end
+
+  def offensive
+    select{ |x| x.is_offensive? }
+  end
+
+  def offensive!
+    select!{ |x| x.is_offensive? }
+  end
+
+  def wild
+    select{ |x| x.special_card? }
+  end
+
+  def wild!
+    select!{ |x| x.special_card? }
   end
 
   def colors
     map { |c| c.color}.uniq
   end
 
-  def select &block
-    return Hand.new(super.select { block } )
-  end
 
   #Uno::COLORS[color]
   def of_color(color)
 	  return select { |card| card.color == color }
+  end
+
+  def of_figure(fig)
+    select{ |c| c.figure == fig}
+  end
+
+  def of_figure!(fig)
+    select!{ |c| c.figure == fig}
   end
 
   def remove!(hand)

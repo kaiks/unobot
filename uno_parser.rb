@@ -11,7 +11,7 @@ class UnoProxy
   attr_accessor :bot, :active_player
   attr_reader :tracker
   attr_reader :game_state, :lock, :card_history
-  attr_reader :turn_counter
+  attr_reader :turn_counter, :last_player
 
   def initialize(bot = nil)
     @bot = bot
@@ -75,6 +75,7 @@ class UnoProxy
           @first_draw = true
           @previous_player = nil
           @active_player = nil
+          @last_player = nil
           @turn_counter = 0
           @card_history = []
           @lock = 1
@@ -123,11 +124,14 @@ class UnoProxy
 
           update_game_state(text)
 
-          if (@previous_player != $bot.nick && !text.include?('passes'))
-            @tracker.stack.remove! @top_card
-            @tracker.stack.remove! @top_card if @double_play
-            #bot cards have been removed before!
-            @tracker.adversaries[@previous_player].plays @top_card, @double_play unless @previous_player.nil?
+          if !text.include?('passes')
+            @last_player = @previous_player
+            if @previous_player != $bot.nick
+              @tracker.stack.remove! @top_card
+              @tracker.stack.remove! @top_card if @double_play
+              #bot cards have been removed before!
+              @tracker.adversaries[@previous_player].plays @top_card, @double_play unless @previous_player.nil?
+            end
           end
 
           @bot.last_card = @top_card
@@ -154,6 +158,7 @@ class UnoProxy
     if parsed.length < 2
       bot.drawn_card_action parsed[0]
     end
+    @tracker.stack.remove! parsed
   end
 
   def host? nick

@@ -8,6 +8,7 @@ class Tracker
   def initialize
     @adversaries = {}
     @played_cards = []
+    @stack = []
   end
 
   def reset

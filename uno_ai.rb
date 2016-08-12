@@ -80,6 +80,16 @@ class Bot
     game_has_state(WAR) || game_has_state(WARWD)
   end
 
+  def default_adversary
+    @proxy.tracker.adversaries.to_a[0][1]
+  end
+
+  def more_cards_than_adversary? adversary = nil
+    adversary ||= default_adversary
+    @hand.size > adversary.card_count
+  end
+
+#todo: change color normally when last few cards include w by adversary
   def play_by_value
     while @proxy.lock == 1
       sleep(0.5)
@@ -89,16 +99,21 @@ class Bot
       return play_predefined_path
     end
 
-    if @last_card.special_card? && has_one_card_or_is_late_game? && !in_war? && @hand.size > @proxy.tracker.adversaries.to_a[0][1].card_count
-      card = attempt_color_change
-      if !card.nil?
-        return play card
+    if @last_card.special_card? && @proxy.last_player!=$bot.nick && !in_war? && more_cards_than_adversary?
+      random_threshold = 6
+      randomly_change_color = rand(10) < random_threshold
+      with_wd4 = true
+      if has_one_card_or_late_game? || randomly_change_color && default_adversary.card_count <= 4 && with_wd4 = false
+        color_change_success = attempt_color_change with_wd4
+        if color_change_success
+          return play_predefined_path
+        end
       end
     end
 
     #todo: export that to play_aggressive and integrate with what's below
-    if has_one_card_or_is_late_game? && !game_has_state(WAR) && @hand.size >= ALGORITHM_CARD_NO_THRESHOLD
-      playable_cards = @hand.playable_after(@last_card).select { |c| c.is_offensive? }
+    if has_one_card_or_late_game? && !game_has_state(WAR) && (@hand.size >= ALGORITHM_CARD_NO_THRESHOLD || @last_card.special_card?  && @proxy.last_player!=$bot.nick)
+      playable_cards = @hand.playable_after(@last_card).offensive
       if playable_cards.length > 0
         if playable_cards[0].special_card?
           playable_cards[0].set_wild_color get_wild_color_heuristic
@@ -148,17 +163,27 @@ class Bot
     end
 
     #todo: if can play offensive, play offensive. Otherwise, play wild
+    do_nothing = false
     if game_has_state WAR
-      playable_cards.select! { |c| c.is_war_playable? }
+      playable_cards.select! { |c| c.is_war_playable? } #+2 or reverse
       playable_cards.select! { |c| c.figure == 'reverse' || c.special_card? } if game_has_state WARWD
     elsif game_has_state ONE_CARD
-      playable_cards.select! { |c| c.is_offensive? || c.special_card? }
-    elsif has_one_card_or_is_late_game?
+      if @hand.length < 5
+        path = calculate_best_path_by_probability_chain
+        if path_valid?(path)
+          probability = smart_probability(path[2], @last_card)
+          if probability[1] >= 0.8 && turns_required(path[2]) <= 2
+            do_nothing = true
+          end
+        end
+      end
+      playable_cards.select! { |c| c.is_offensive? || c.special_card? } unless do_nothing && playable_cards.offensive.empty?
+    elsif has_one_card_or_late_game?
       playable_cards.select! { |c| c.is_offensive? || c.special_card? } if playable_cards.select{|c| c.is_offensive?}.length>0
     end
 
 
-    playable_special_cards = playable_cards.select { |c| c.special_card? }
+    playable_special_cards = playable_cards.wild
 
 
     playable_special_cards.sort_by! { |c| c.figure }
@@ -170,7 +195,7 @@ class Bot
 
 
     if playable_cards.length == 0
-      return draw
+      draw
     else
       if playable_normal_cards.length > 0
         debug "Playing normal card: #{playable_normal_cards[0]} [should only be here if >=#{ALGORITHM_CARD_NO_THRESHOLD} cards (#{@hand.size}]"
@@ -186,7 +211,7 @@ class Bot
             return draw
           end
         end
-        if @hand.length > 7
+        if @hand.length >= ALGORITHM_CARD_NO_THRESHOLD
           debug 'h>7'
           playable_special_cards[0].set_wild_color get_wild_color_heuristic
         else
@@ -199,8 +224,8 @@ class Bot
     end
   end
 
-  def has_one_card_or_is_late_game?
-    game_has_state(ONE_CARD) || @proxy.tracker.adversaries.to_a[0][1].card_count <= 1+@proxy.turn_counter/20
+  def has_one_card_or_late_game?
+    game_has_state(ONE_CARD) || default_adversary.card_count <= 1+@proxy.turn_counter/20
   end
 
   #Tries to find offensive path through skips or double reverses.
@@ -211,17 +236,15 @@ class Bot
     offensive_cards = @hand.select{|c| c.figure=='+2'}
     return [] if offensive_cards.length == 0
     #First attempt: try to build a 0 turn path with skips
-    skips = @hand.select{|c| c.figure=='skip'}
-    start = skips.select{|c| c.plays_after? @last_card}
+    skips = @hand.of_figure('skip')
+    start = skips.playable_after @last_card
     bridges = skips.select{|c| offensive_cards.map{|o| o.color}.include? c.color}
     if start.length > 0 && bridges.length > 0
       return [start[0], bridges[0], offensive_cards.find{|c| c.plays_after? bridges[0]}]
     else
       reverses = @hand.select{|c| c.figure=='reverse'}
-      start = reverses.select{|c| c.plays_after? @last_card}
+      start = reverses.playable_after @last_card
       continuation = reverses.select{|c| offensive_cards.map{|o| o.color}.include? c.color}
-      #debug from here onwards
-      return []
       continuation = continuation.group_by{ |i| i.to_s }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
       if continuation.length > 0
         return [start[0], start[1], continuation[0][0], continuation[0][1],
@@ -261,28 +284,43 @@ class Bot
   end
 
   def path_valid? path
-    path.exists_and_has(3) && path[2].size > 0 && path[1] > 0
+    path.exists_and_has(3) && !path[2].empty? && path[1] > 0
   end
 
-  def attempt_color_change
-    wilds = @hand.select{|c| c.special_card? }
-    if wilds.length > 0
-      c = get_wild_color_heuristic
-      #todo: make it not random
-      while c == @last_card.color
-        c = Uno.random_color
+  def attempt_color_change(with_wd4 = true)
+    wilds = @hand.select{|c| c.figure == 'wild' || with_wd4 && c.figure=='wild+4' }
+    if !wilds.empty?
+      #order proposed colors first by what we have, second by what he doesn't have
+      hand_color_counts = @hand.group_by{ |c| c.color}.each_with_object({}) { |(k,v), h| h[k] = v.length }.to_a
+      hand_colors_ordered = hand_color_counts.sort_by{|x| -x[1]}.map{|c| c[0]}
+
+      stack_color_counts = @proxy.tracker.stack.group_by{ |c| c.color}.each_with_object({}) { |(k,v), h| h[k] = v.length }.to_a
+      stack_colors_ordered = stack_color_counts.sort_by{|x| -x[1]}.map{|c| c[0]}
+      c = (hand_color_counts + stack_colors_ordered).uniq
+      while c[0] == @last_card.color || c[0] == :wild
+        c = c.drop(1)
       end
       wilds[0].set_wild_color c
-      return wilds[0]
+      @predefined_path = [wilds[0]]
+      return true
     else
-      skips = @hand.select{|c| c.figure == 'skip' }
-      if skips.length > 1 && skips.select{|c| c.color == @last_card.color }.length > 0 && skips.select{|c| c.color != @last_card.color }.length > 0
-        @predefined_path = [skips.select{|c| c.color != @last_card.color}[0]]
-        return skips.select{|c| c.color == @last_card.color }[0]
+      skips = @hand.of_figure('skip')
+      if skips.length > 1 && !skips.of_color(@last_card.color).empty? && !skips.select{|c| c.color != @last_card.color }.empty?
+        @predefined_path = [skips.of_color(@last_card.color)[0], skips.find{|c| c.color != @last_card.color}]
+        return true
       end
       #todo: reverse
+
+      reverses = @hand.select{|c| c.figure=='reverse'}
+      start = reverses.playable_after @last_card
+      continuation = reverses.select{|c| c.color != @last_card.color}
+      continuation = continuation.group_by{ |i| i.to_s }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
+      if continuation.length > 0
+        @predefined_path = [start[0], start[1], continuation[0][0], continuation[0][1]]
+        return true
+      end
     end
-    return nil
+    return false
   end
 
   def best_chain_color p = nil
@@ -303,7 +341,7 @@ class Bot
     if c.plays_after? @last_card
       if c.special_card?
 
-        if has_one_card_or_is_late_game?
+        if has_one_card_or_late_game?
           c.set_wild_color get_wild_color_heuristic
           return play c
         end
@@ -328,7 +366,7 @@ class Bot
   def calculate_color_values
     @color_value = Array.new(4)
     4.times do |color|
-      @color_value[color] = @hand.select { |card| card.color == Uno::COLORS[color] }.value || -1
+      @color_value[color] = @hand.of_color(Uno::COLORS[color]).value || -1
     end
   end
 
@@ -340,9 +378,6 @@ class Bot
     return Uno::COLORS[most_valuable_color_index]
   end
 
-  def war_cards
-    @hand.select { |card| card.is_war_playable? }
-  end
 
   def replace_hand(hand)
     @hand.delete_if { |x| true }
@@ -402,7 +437,7 @@ class Bot
     card.visited = 1
 
 
-    playable = @hand.select { |c| (c.plays_after? card) && (c.visited == 0) && (c.figure != 'wild+4') }
+    playable = @hand.playable_after(card).select { |c| (c.plays_after? card) && (c.visited == 0) && (c.figure != 'wild+4') }
 
     maxchildren = 0
     best_sequence = []
