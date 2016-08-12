@@ -4,7 +4,11 @@ class UnoCard
   include Uno
 
   attr_reader :color, :figure
-  attr_accessor :visited
+  attr_accessor :visited, :debug
+
+  def self.debug text
+    puts text if @debug
+  end
 
   def initialize(color, figure)
     figure = figure.downcase if figure.is_a? String
@@ -15,6 +19,7 @@ class UnoCard
     @color = color
     @figure = figure
     @visited = 0
+    @debug = false
 
     throw "Not a valid card #{@color} #{@figure}" unless valid?
   end
@@ -44,9 +49,9 @@ class UnoCard
 
   def self.parse_wild(card_text)
     card_text = card_text.downcase
-    puts "parsing #{card_text}"
+    debug "parsing #{card_text}"
     if card_text[0..1].downcase == 'ww'
-      puts '--WARNING: WILD CARD ' + card_text
+      debug '--WARNING: WILD CARD ' + card_text
       color = :wild
       short_figure = card_text[1..100]
     else
@@ -69,6 +74,11 @@ class UnoCard
     else
       normalize_color + normalize_figure
     end
+  end
+
+  def to_irc_s
+    #IRC_COLOR_CODES.fetch(normalize_color.to_s,'13')
+    "#{3.chr}#{color_number}[#{normalize_figure.to_s.upcase}]"
   end
 
   def bot_output

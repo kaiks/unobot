@@ -308,7 +308,7 @@ class Bot
           return play c
         end
 
-        path = calculate_best_path_by_probability_chain unless @hand.size < 8
+        path = calculate_best_path_by_probability_chain unless @hand.size > 7
         if !path_valid?(path) || path[0].figure != c.figure
           @proxy.add_message('pa')
           return
