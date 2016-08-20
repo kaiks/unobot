@@ -1,4 +1,4 @@
-require 'uno.rb'
+require_relative 'uno.rb'
 
 class UnoCard
   include Uno

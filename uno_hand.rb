@@ -1,6 +1,13 @@
-require 'uno_card.rb'
+require_relative 'uno_card.rb'
 
 class Hand < Array
+
+  def from_text array
+    throw 'Wrong argument' unless array.is_a?(Array) && array.map{|e| e.is_a? String}.all?
+    array.each{ |e|
+      self << UnoCard.parse(e)
+    }
+  end
 
   def <<(cards)
     push(cards)
@@ -114,6 +121,10 @@ class Hand < Array
     hand_colors = colors
     hand_colors.delete(:wild)
     hand_colors.size < 2
+  end
+
+  def to_s
+    self.map{|c| c.to_s}.to_s
   end
   
 end

@@ -1,5 +1,5 @@
-require 'uno_card_stack.rb'
-require 'uno_player.rb'
+require_relative 'uno_card_stack.rb'
+require_relative 'uno_player.rb'
 
 class Tracker
   attr_accessor :stack

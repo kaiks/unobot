@@ -1,4 +1,4 @@
-require 'misc.rb'
+require_relative 'misc.rb'
 module Uno
   COLORS = [:red, :green, :blue, :yellow, :wild]
   NORMAL_COLORS = [:red, :green, :blue, :yellow]

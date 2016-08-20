@@ -1,5 +1,5 @@
-require 'uno_card.rb'
-require 'uno_ai.rb'
+require_relative 'uno_card.rb'
+require_relative 'uno_ai.rb'
 
 GAME_OFF = 16
 GAME_ON = 0

@@ -3,40 +3,38 @@
 #sequel
 
 require 'cinch'
-require 'uno_parser.rb'
-require 'pts_ratio_checker.rb'
+require_relative 'uno_parser.rb'
+require_relative 'pts_ratio_checker.rb'
 
-
-proxy = UnoProxy.new(nil)
-bot = Bot.new(proxy, 0)
 
 LAG_DELAY = 0.3      #sec
 BOT_NICK = 'unobot'
 
 $debug = false
 
-proxy.bot = bot
-
 $last_turn_message = Time.now+2
 $last_acted_on_turn_message = Time.now
 
-
-
 autojoin = false
 last_creator = ''
+
+proxy = UnoProxy.new(nil)
+bot = Bot.new(proxy, 0)
+proxy.bot = bot
+
 $bot = Cinch::Bot.new do
   configure do |c|
     c.server = 'localhost'
-    c.channels = ['#uno']
+    c.channels = ['#kx']
     c.nick = BOT_NICK
     c.host_nicks = ['ZbojeiJureq', 'ZbojeiJureq_', 'ZbojeiJureq__']
-    c.admin_nicks = ['kx']
+    c.admin_nicks = ['kx', 'kaiks']
     c.messages_per_second = 100000 if c.server == 'localhost'
     c.server_queue_size = 10000000 if c.server == 'localhost'
   end
 
   on :message do |m|
-    if m.message =~ /^eval/ #&& $bot.config.admin_nicks.include?(m.user.nick)
+    if m.message =~ /^eval/ && $bot.config.admin_nicks.include?(m.user.nick)
       m.reply "#{eval m.message.split.drop(1).join(' ')}"
     end
     proxy.parse_main(m.user.nick, m.message)
@@ -70,7 +68,6 @@ $bot = Cinch::Bot.new do
       if autojoin && can_play_with?(last_creator)
         m.reply 'jo'
         proxy.tracker.reset
-        proxy.tracker.new_adversary(last_creator)
       end
     end
 
@@ -98,7 +95,7 @@ $bot = Cinch::Bot.new do
         proxy.get_message_queue.each { |i| @bot.Channel($bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
       else
-        while $last_acted_on_turn_message == $last_turn_message
+        while $last_acted_on_turn_message == $last_turn_message || proxy.lock == 1
           sleep(LAG_DELAY)
           puts 'Waiting for the message...'
         end

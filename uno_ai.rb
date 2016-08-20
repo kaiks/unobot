@@ -1,8 +1,9 @@
-require 'uno_hand.rb'
-require 'uno_tracker.rb'
-#todo: make path its own object
-#todo: improve number of enemy cards tracking
-#todo:
+require_relative 'uno_hand.rb'
+require_relative 'uno_tracker.rb'
+#todo: track what color the enemy didn't have in the last x rounds:
+#using revamped card_history
+#todo: use the above to make color change smart
+#todo: use the above to create figure change
 WAR = 1
 WARWD = 2
 ONE_CARD = 4
@@ -225,7 +226,7 @@ class Bot
   end
 
   def has_one_card_or_late_game?
-    game_has_state(ONE_CARD) || default_adversary.card_count <= 1+@proxy.turn_counter/20
+    game_has_state(ONE_CARD) || default_adversary.card_count <= [1+@proxy.turn_counter/20,5].min
   end
 
   #Tries to find offensive path through skips or double reverses.
@@ -290,17 +291,20 @@ class Bot
   def attempt_color_change(with_wd4 = true)
     wilds = @hand.select{|c| c.figure == 'wild' || with_wd4 && c.figure=='wild+4' }
     if !wilds.empty?
-      #order proposed colors first by what we have, second by what he doesn't have
-      hand_color_counts = @hand.group_by{ |c| c.color}.each_with_object({}) { |(k,v), h| h[k] = v.length }.to_a
-      hand_colors_ordered = hand_color_counts.sort_by{|x| -x[1]}.map{|c| c[0]}
-
-      stack_color_counts = @proxy.tracker.stack.group_by{ |c| c.color}.each_with_object({}) { |(k,v), h| h[k] = v.length }.to_a
-      stack_colors_ordered = stack_color_counts.sort_by{|x| -x[1]}.map{|c| c[0]}
-      c = (hand_color_counts + stack_colors_ordered).uniq
+      #order proposed colors first by what we have, second by what he DOESN'T have
+	  #the *1000 thing should be refactored
+      hand_color_counts = @hand.group_by{ |c| c.color}.each_with_object({}) { |(k,v), h| h[k] = v.length*1000 }
+      stack_color_counts = @proxy.tracker.stack.group_by{ |c| c.color}.each_with_object({}) { |(k,v), h| h[k] = v.length }
+	  
+	  hand_color_counts.each{|k,v| v -= stack_color_counts[k]}
+	  
+      hand_colors_ordered = hand_color_counts.to_a.sort_by{|x| -x[1]}.map{|c| c[0]}
+      stack_colors_ordered = stack_color_counts.to_a.sort_by{|x| x[1]}.map{|c| c[0]}
+      c = (hand_colors_ordered + stack_colors_ordered).uniq
       while c[0] == @last_card.color || c[0] == :wild
         c = c.drop(1)
       end
-      wilds[0].set_wild_color c
+      wilds[0].set_wild_color c[0]
       @predefined_path = [wilds[0]]
       return true
     else

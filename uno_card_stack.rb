@@ -1,5 +1,5 @@
-require 'uno_card.rb'
-require 'uno_hand.rb'
+require_relative 'uno_card.rb'
+require_relative 'uno_hand.rb'
 
 class CardStack < Hand
 
