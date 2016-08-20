@@ -22,15 +22,17 @@ class TestStrategy < Test::Unit::TestCase
 
 
     path = @bot.calculate_best_path_by_probability_chain
+    path_s = path[2].map{|c| c.to_s}.to_s
 
-    assert_equal(path[2].map{|c| c.to_s}.to_s,'["ys", "y6"]')
+    assert_equal(path[2].map{|c| c.to_s}.to_s,["ys", "y6"].to_s, "Wrong path: #{path_s}")
   end
 
   def test_wd4_skip
     @bot.last_card = UnoCard.parse('b5')
     @bot.hand.from_text ['g6', 'gs', 'gs', 'wd4']
     path = @bot.calculate_best_path_by_probability_chain
-    assert_equal(path[2].map{|c| c.to_s}.to_s,'["wd4g", "gs", "gs", "g6"]')
+    path_s = path[2].map{|c| c.to_s}.to_s
+    assert_equal(path_s,["wd4g", "gs", "gs", "g6"].to_s, "Wrong path: #{path_s}")
   end
 
   def test_skip_2
@@ -42,7 +44,8 @@ class TestStrategy < Test::Unit::TestCase
 
     assert(
         path_s == ["g1", "gs", "g3", "w", "r5", "r+2", "b7"].to_s ||
-        path_s == ["g3", "gs", "g1", "w", "r5", "r+2", "b7"]
+        path_s == ["g3", "gs", "g1", "w", "r5", "r+2", "b7"].to_s,
+        "Wrong path: #{path_s}"
     )
 
   end
@@ -57,7 +60,10 @@ class TestStrategy < Test::Unit::TestCase
   end
 
   def test_wild
-    
+    @bot.hand.from_text ['b6', 'r7', 'ww']
+    path = @bot.calculate_best_path_by_probability_chain
+
+    assert_nil(path, "Path was supposed to be nil, was #{path.to_s} instead")
   end
 
 end
