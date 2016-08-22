@@ -57,27 +57,27 @@ class Tracker
   end
 
   def change_from_wd4_probability color
-    @prob_cache[20+ Uno::COLORS.index(color)] ||= 1.0 -
+    @prob_cache[2000+ Uno::COLORS.index(color)] ||= 1.0 -
         (@stack.select{|c| c.figure == 'wild+4' || c.figure=='reverse' && c.color==color}.length.to_f/stack_size)
   end
 
   def change_from_plus2_probability card
-    @prob_cache[30+card.code] ||= 1.0 -
+    @prob_cache[3000+card.code] ||= 1.0 -
         (@stack.select{|c| c.figure == 'wild+4' || c.figure == '+2' || c.figure=='reverse' && c.color==card.color}.length.to_f/stack_size)
   end
 
   def color_change_probability card
-    @prob_cache[40+card.code] ||= 1.0 -
+    @prob_cache[4000+card.code] ||= 1.0 -
         (@stack.select{|c| (c.figure == card.figure && c.color != card.color) || c.special_card?}.length.to_f/stack_size)
   end
 
   def figure_change_probability card
-    @prob_cache[50+card.code] ||= 1.0 -
+    @prob_cache[5000+card.code] ||= 1.0 -
         (@stack.select{|c| (c.color == card.color && c.figure != card.figure) || c.special_card?}.length.to_f/stack_size)
   end
 
   def successive_probability current, previous
-    @prob_cache[60+current.code+previous.code] ||= @stack.
+    @prob_cache[6000+current.code+previous.code] ||= @stack.
         select{|c| (c.plays_after? previous) && (current.plays_after? c)}.length.to_f/stack_size
   end
 end
