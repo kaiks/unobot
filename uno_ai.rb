@@ -145,7 +145,7 @@ class Bot
         unless longest_path[2][1].nil?
           #two cards,same color, same figure
           if longest_path[2][1].code == longest_path[2][0].code
-            if longest_path[2][0].special_card?
+            if longest_path[2][0].special_card? || longest_path[2][0].figure=='skip'
               return play longest_path[0]
             else
               return double_play longest_path[0]
@@ -266,7 +266,8 @@ class Bot
     raise 'Predefined path is empty' if @predefined_path.length == 0
     raise 'Predefined path is wrong: can\'t play' unless @predefined_path[0].plays_after? @last_card
     if @predefined_path.length >= 2
-      if @predefined_path[0].code == @predefined_path[1].code && !@predefined_path[0].special_card?
+      if @predefined_path[0].code == @predefined_path[1].code &&
+          !@predefined_path[0].special_card? && !(@predefined_path[0].figure=='skip')
         double_play @predefined_path[0] unless @predefined_path[0].special_card?
         @predefined_path = @predefined_path.drop(2)
       end
