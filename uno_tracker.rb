@@ -53,7 +53,7 @@ class Tracker
 
   def change_from_wild_probability
     #todo: 2+ skips
-    @prob_cache[10] ||= 1.0 - (@stack.select{|c| c.special_card?}.length.to_f/stack_size)
+    @prob_cache[1000] ||= 1.0 - (@stack.select{|c| c.special_card?}.length.to_f/stack_size)
   end
 
   def change_from_wd4_probability color
