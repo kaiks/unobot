@@ -2,12 +2,19 @@ require_relative 'uno_card.rb'
 
 class Hand < Array
 
+  def self.from_text array
+    throw 'Wrong argument' unless array.is_a?(Array) && array.map{|e| e.is_a? String}.all?
+    return self.new(array.map{|c| UnoCard.parse(c)})
+  end
+
   def from_text array
     throw 'Wrong argument' unless array.is_a?(Array) && array.map{|e| e.is_a? String}.all?
+    self.drop self.length
     array.each{ |e|
       self << UnoCard.parse(e)
     }
   end
+
 
   def <<(cards)
     push(cards)

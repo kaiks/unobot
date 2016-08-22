@@ -3,7 +3,7 @@ require_relative 'uno.rb'
 class UnoCard
   include Uno
 
-  attr_reader :color, :figure
+  attr_reader :color, :figure, :code
   attr_accessor :visited, :debug
 
   def self.debug text
@@ -18,6 +18,7 @@ class UnoCard
 
     @color = color
     @figure = figure
+    @code = Uno::CARD_CODES[to_s]
     @visited = 0
     @debug = false
 
@@ -155,7 +156,9 @@ def self.valid_color? color
   end
 
   def special_card?
-    Uno::SPECIAL_FIGURES.member?(@figure)
+    #Uno::SPECIAL_FIGURES.member?(@figure)
+    @figure == 'wild+4' || @figure == 'wild'
+    #23.97
   end
 
   def special_valid_card?
@@ -163,7 +166,11 @@ def self.valid_color? color
   end
 
   def valid?
-    Uno::COLORS.member?(@color) && Uno::FIGURES.member?(@figure)
+    color_valid? && Uno::FIGURES.member?(@figure)
+  end
+
+  def color_valid?
+    @color == :green || @color == :red || @color == :blue || @color == :yellow || @color == :wild
   end
 
   def is_offensive?
