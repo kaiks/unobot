@@ -50,7 +50,7 @@ class UnoCard
     debug "[parse_wild] Parsing #{card_text}"
     color = :wild
     short_figure = 'w'
-    if card_text[1] != 'ww'
+    if card_text[1] != 'w'
       short_figure = 'wd4' if card_text[1..2] == 'd4'
       if card_text[-1] != '4'
         color = Uno.expand_color(card_text[-1])
