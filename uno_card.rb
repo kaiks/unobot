@@ -34,7 +34,7 @@ class UnoCard
   end
 
   def self.parse(card_text)
-    card_text = card_text.downcase
+    card_text.downcase!
 
     return UnoCard.parse_wild(card_text) if card_text[0] == 'w'
 
@@ -43,29 +43,21 @@ class UnoCard
 
     color = Uno.expand_color(short_color)
     figure = Uno.expand_figure(short_figure)
-
-    return UnoCard.new(color, figure)
+    UnoCard.new(color, figure)
   end
 
   def self.parse_wild(card_text)
-    card_text = card_text.downcase
-    debug "parsing #{card_text}"
-    if card_text[0..1].downcase == 'ww'
-      debug '--WARNING: WILD CARD ' + card_text
-      color = :wild
-      short_figure = card_text[1..100]
-    else
-      short_figure = card_text[1].downcase == 'd' ? 'wd4' : 'w'
-      short_color = card_text[-1]
-      if short_color == '4'
-        color = :wild
-      else
-        color = Uno.expand_color(short_color)
+    debug "[parse_wild] Parsing #{card_text}"
+    color = :wild
+    short_figure = 'w'
+    if card_text[1] != 'ww'
+      short_figure = 'wd4' if card_text[1..2] == 'd4'
+      if card_text[-1] != '4'
+        color = Uno.expand_color(card_text[-1])
       end
     end
-
     figure = Uno.expand_figure(short_figure)
-    return UnoCard.new(color, figure)
+    UnoCard.new(color, figure)
   end
 
   def to_s
