@@ -35,7 +35,7 @@ $bot = Cinch::Bot.new do
 
   on :message do |m|
     if m.message =~ /^eval/ && $bot.config.admin_nicks.include?(m.user.nick)
-      m.reply "#{eval m.message.split.drop!(1).join(' ')}"
+      m.reply "#{eval m.message.split.drop(1).join(' ')}"
     end
     proxy.parse_main(m.user.nick, m.message)
     if m.message =~ /\.uno/
