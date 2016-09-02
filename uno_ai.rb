@@ -10,7 +10,7 @@ ONE_CARD = 4
 GAME_OFF = 16
 GAME_ON = 0
 
-ALGORITHM_CARD_NO_THRESHOLD = 9
+ALGORITHM_CARD_NO_THRESHOLD = 8
 
 class Bot
   attr_accessor :last_card
@@ -18,7 +18,7 @@ class Bot
   attr_accessor :predefined_path
 
   def initialize(proxy, autostart = 1)
-    @PLAY_DEBUG = $debug
+    @PLAY_DEBUG = $DEBUG
     @proxy = proxy
     @hand = Hand.new
     @predefined_path = []
@@ -144,8 +144,8 @@ class Bot
         next_card = longest_path[2][0]
         unless longest_path[2][1].nil?
           #two cards,same color, same figure
-          if longest_path[2][1].code == longest_path[2][0].code
-            if longest_path[2][0].special_card? || longest_path[2][0].figure=='skip'
+          if longest_path[2][1].code == next_card.code
+            if next_card.special_card? || next_card.figure=='skip'
               return play longest_path[0]
             else
               return double_play longest_path[0]
@@ -252,11 +252,12 @@ class Bot
     else
       reverses = @hand.select{|c| c.figure=='reverse'}
       start = reverses.playable_after @last_card
+	  return [] unless start.length > 1
       continuation = reverses.select{|c| offensive_cards.map{|o| o.color}.include? c.color}
-      continuation = continuation.group_by{ |i| i.code }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
+      continuation = continuation.group_by{ |i| i.to_s }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
       if continuation.length > 0
         return [start[0], start[1], continuation[0][0], continuation[0][1],
-                           offensive_cards.find{|c| c.plays_after? continuation[0][0]}]
+                           offensive_cards.find{|c| c.plays_after? UnoCard.parse(continuation[0][0]) }]
       end
     end
     []
@@ -285,11 +286,13 @@ class Bot
     #Get color list. Make them into [color, no. of cards with that color] array.
     #Find the largest number in such a couple. Return the color that is matched.
 
-    best_color = @hand.select{|c|!c.special_card?}.
-        group_by{|c| c.color}.map{|k,v| [k,v.length]}.
+    best_color = @hand.select{|c|!c.special_card?}
+    if best_color.length > 0
+        best_color = best_color.group_by{|c| c.color}.map{|k,v| [k,v.length]}.
         max{|x,y| x[1]<=>y[1]}[0]
-
-    best_color ||= Uno.random_color
+    else
+      Uno.random_color
+    end
   end
 
   def path_valid? path
@@ -391,7 +394,7 @@ class Bot
 
 
   def replace_hand(hand)
-    @hand.delete_if { |x| true }
+    @hand.drop! hand.length
     hand.each { |i| @hand.push(i) }
   end
 
@@ -430,7 +433,7 @@ class Bot
   end
 
   #works if first card is wild
-  def assign_wildcard_color_with_sequence(sequence)
+  def assign_sequence_wild_color(sequence)
     sequence_copy = Array.new(sequence)
     sequence_copy.delete_if { |x| x.special_card? }
 
@@ -494,7 +497,7 @@ class Bot
     card.visited = 0
     debug "lvl#{accu}: returning #{[best_sequence[0], maxchildren, best_sequence]}"
     if !best_sequence[0].nil? && best_sequence[0].special_card?
-      assign_wildcard_color_with_sequence best_sequence
+      assign_sequence_wild_color best_sequence
     end
     return [best_sequence[0], maxchildren, best_sequence]
 

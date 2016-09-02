@@ -10,7 +10,7 @@ require_relative 'pts_ratio_checker.rb'
 LAG_DELAY = 0.3      #sec
 BOT_NICK = 'unobot'
 
-$debug = false
+$DEBUG = true
 
 $last_turn_message = Time.now+2
 $last_acted_on_turn_message = Time.now
@@ -35,7 +35,7 @@ $bot = Cinch::Bot.new do
 
   on :message do |m|
     if m.message =~ /^eval/ && $bot.config.admin_nicks.include?(m.user.nick)
-      m.reply "#{eval m.message.split.drop(1).join(' ')}"
+      m.reply "#{eval m.message.split.drop!(1).join(' ')}"
     end
     proxy.parse_main(m.user.nick, m.message)
     if m.message =~ /\.uno/

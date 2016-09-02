@@ -66,11 +66,11 @@ class UnoGame
   end
 
   def add_player p
-    if @locked == false
+    if @locked
+      notify "Sorry, it's not possible to join this game anymore."
+    else
       @players.push p
       @players.shuffle!
-    else
-      notify "Sorry, it's not possible to join this game anymore."
     end
   end
 

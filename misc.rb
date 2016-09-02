@@ -1,4 +1,6 @@
-
+def debug text
+  puts if $DEBUG
+end
 
 class Array
   #array exists and has nth element (1=array start) not null

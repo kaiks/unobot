@@ -35,7 +35,6 @@ class UnoCard
 
   def self.parse(card_text)
     card_text = card_text.downcase
-    text_length = card_text.length
 
     return UnoCard.parse_wild(card_text) if card_text[0] == 'w'
 
@@ -108,6 +107,8 @@ class UnoCard
         12#:blue
       when :wild
         13#:blue
+      else
+        throw 'Wrong color number'
     end
   end
 
@@ -138,6 +139,12 @@ class UnoCard
       return Uno::SHORT_FIGURES[Uno::FIGURES.find_index figure]
     end
   end
+
+  def self.random top_id = 53
+    card_text = Uno::CARD_CODES.keys[top_id+1] #because rand doesn't include top number
+    UnoCard.parse(card_text)
+  end
+
 
   def valid_color?
     Uno::COLORS.member? @color

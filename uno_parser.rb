@@ -20,13 +20,13 @@ class UnoProxy
     @active_player = nil
     @game_players = []
     @card_history = []
-    @top_card     = []
+    @top_card = []
     @nick = []
     @messages = []
     @not_started = true
     @tracker = Tracker.new
     @stack_size = 0
-    @first_draw = true
+    @game_start_draw = true
     @double_play = false
     @turn_counter = 0
   end
@@ -56,30 +56,21 @@ class UnoProxy
     end
   end
 
-  def parse_main(nick,text)
+  def parse_main(nick, text)
     if host? nick
-      puts 'Got me some text'
+      debug "[parse_main] Bot says: #{text}"
       case text
         when /must respond/
           add_game_state_flag WAR
           @stack_size = /\(total ([0-9]+)/.match(text)[1].to_i
           puts "Set stack size to #{@stack_size}"
         when /Playing two cards/
-          puts "Double play detected" if $debug
+          debug 'Double play detected'
           @double_play = true
         when /Ok, created.*/
-          #if text == "Ok, created 04U09N12O08! game on #kx, say 'jo' to join in" && host?
-          #todo: extract this to a reset method
-          @game_state = GAME_ON
-          @not_started = false
-          @first_draw = true
-          @previous_player = nil
-          @active_player = nil
-          @last_player = nil
-          @turn_counter = 0
-          @card_history = []
+          #"Ok, created 04U09N12O08! game on #kx, say 'jo' to join in"
+          initialize_game_variables
           @lock = 1
-          #end
         when /joins the game/
           nick = text.split[0]
           @tracker.new_adversary nick unless nick.include? $bot.nick
@@ -99,9 +90,7 @@ class UnoProxy
 
           @active_player = /([a-z_\-\[\]\\^{}|`][a-z0-9_\-\[\]\\^{}|`]{1,15})'s/i.match(text)[1]
           if text.include? $bot.nick
-            if !text.include? "#{$bot.nick} passes"
-              $last_turn_message = Time.now
-            end
+            $last_turn_message = Time.now unless text.include? "#{$bot.nick} passes"
           end
 
           card_text_index = text.rindex(/\s/)
@@ -125,7 +114,7 @@ class UnoProxy
 
           update_game_state(text)
 
-          if !text.include?('passes')
+          unless text.include?('passes')
             @last_player = @previous_player
             if @previous_player != $bot.nick
               @tracker.stack.remove! @top_card
@@ -143,19 +132,23 @@ class UnoProxy
         when /raws/
           update_game_state(text)
       end
-    else
-      case text
-        when /^\!uno$/
-          @game_players = [nick] if @not_started
-      end
-
-
     end
+  end
+
+  def initialize_game_variables
+    @game_state = GAME_ON
+    @not_started = false
+    @game_start_draw = true
+    @previous_player = nil
+    @active_player = nil
+    @last_player = nil
+    @turn_counter = 0
+    @card_history = []
   end
 
   def drawn_card c
     parsed = parse_hand(c, true)
-    puts "parsed card #{parsed}" if $debug
+    debug "[drawn_card] Parsed card: #{parsed}"
     if parsed.length < 2
       bot.drawn_card_action parsed[0]
     end
@@ -167,29 +160,29 @@ class UnoProxy
   end
 
   def parse_card_text(card_text)
-    puts "parse_card_text #{card_text}" if $debug
+    debug "[parse_card_text] #{card_text}"
     figure = card_text.match(/\[(.*)\]/)[1]
     color = card_text.match(/\d+/)[0]
     color = color.to_i
-    puts "parse_card_text figure -> #{figure} color -> #{color}" if $debug
+    debug "[parse_card_text] Parsed figure: #{figure} color: #{color}"
     UnoCard.parse(extract_color(color).to_s+figure.to_s)
   end
 
   def parse_hand(card_text, noreplace = false)
     unless card_text.match('c')
-      puts 'Got hand, I guess.'
+      puts '[parse_hand] Got hand, I guess.'
       card_text.strip!
 
       card_texts = card_text.split(3.chr)
       card_texts.delete_if { |ct| ct.to_s == nil.to_s }
       cards = []
-      puts "card_texts -> #{card_texts.join('//')}"
-      card_texts.each { |ct| cards.push(parse_card_text(ct)) }
-      @bot.replace_hand(cards) unless noreplace == true
-      puts "parsed hand -> #{cards.to_s}"
+      puts "[parse_hand] card_texts: #{card_texts.join('//')}"
+      cards = card_texts.map{|ct| parse_card_text(ct) }
+      puts "[parse_hand] parsed: #{cards.to_s}"
+      @bot.replace_hand(cards) unless noreplace
 
-      if @first_draw
-        @first_draw = false
+      if @game_start_draw
+        @game_start_draw = false
         @tracker.stack.remove! cards
       end
 
@@ -200,15 +193,17 @@ class UnoProxy
   def extract_color(number)
     case number
       when 3
-        'g'#:green
+        'g' #:green
       when 4
-        'r'#:red
+        'r' #:red
       when 7
-        'y'#:yellow
+        'y' #:yellow
       when 12
-        'b'#:blue
+        'b' #:blue
       when 13
-        'w'#:wild
+        'w' #:wild
+      else
+        throw 'Wrong color number'
     end
   end
 

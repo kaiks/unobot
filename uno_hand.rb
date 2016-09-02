@@ -9,7 +9,7 @@ class Hand < Array
 
   def from_text array
     throw 'Wrong argument' unless array.is_a?(Array) && array.map{|e| e.is_a? String}.all?
-    self.drop self.length
+    drop! self.length
     array.each{ |e|
       self << UnoCard.parse(e)
     }
@@ -44,24 +44,14 @@ class Hand < Array
     }
   end
 
-  def drop(n)
+  def drop!(n)
     n.times { delete_at(0) }
     self
   end
   
-  
   def add_random(n)
     n.times {
-      color_index = rand(4)
-      figure_index = rand(15)
-
-      color_index = 4 if figure_index > 12 #in case of wild figure
-
-      color = Uno::COLORS[color_index]
-      figure = Uno::FIGURES[figure_index]
-
-      card = UnoCard.new(color, figure)
-      add_card(card)
+      add_card(UnoCard.random)
     }
   end
 
@@ -112,15 +102,23 @@ class Hand < Array
     select!{ |c| c.figure == fig}
   end
 
-  def remove!(hand)
-    if hand.class == Hand
-      hand.each {|card|
-        i = index{ |c| c.to_s == card.to_s }
-        slice! i unless i.nil?
-      }
-    elsif hand.class == UnoCard
-      i = index{ |c| c.to_s == hand.to_s }
+  def remove_cards!(cards)
+    cards.each {|card|
+      i = index{ |c| c.to_s == card.to_s }
       slice! i unless i.nil?
+    }
+  end
+
+  def remove_card!(card)
+    i = index{ |c| c.to_s == card.to_s }
+    slice! i unless i.nil?
+  end
+
+  def remove!(item)
+    if item.class == Hand
+      remove_cards! item
+    elsif item.class == UnoCard
+      remove_card! item
     end
   end
 
@@ -128,10 +126,6 @@ class Hand < Array
     hand_colors = colors
     hand_colors.delete(:wild)
     hand_colors.size < 2
-  end
-
-  def to_s
-    self.map{|c| c.to_s}.to_s
   end
   
 end
