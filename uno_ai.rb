@@ -241,7 +241,7 @@ class Bot
   #todo: extension to plays: brbr -> rrrr -> rs -> ys -> y+2
   def get_offensive_path
     #Check if we have a chance to play offensive cards at all
-    offensive_cards = @hand.select{|c| c.figure=='+2'}
+    offensive_cards = @hand.of_figure('+2')
     return [] if offensive_cards.length == 0
     #First attempt: try to build a 0 turn path with skips
     skips = @hand.of_figure('skip')
@@ -407,7 +407,7 @@ class Bot
     sequence.each_with_index { |card, index|
       if index != last_index
         if card.figure == 'skip'
-          score += 0
+          next
         elsif card.figure == 'reverse' #old code
           score += 1
         else
@@ -451,7 +451,7 @@ class Bot
     card.visited = 1
 
 
-    playable = @hand.playable_after(card).select { |c| (c.plays_after? card) && (c.visited == 0) && (c.figure != 'wild+4') }
+    playable = @hand.playable_after(card).select { |c| (c.visited == 0) && (c.figure != 'wild+4') }
 
     maxchildren = 0
     best_sequence = []
@@ -540,46 +540,57 @@ class Bot
     return probability(cards.drop(1), cards[0], total_score + prev_iter*prob_of_continuing, prev_iter*prob_of_continuing)
   end
 
-  def smart_probability(cards, prev_card, total_score = 0, prev_iter = 1)
-    #completion condition
-    debug "prob -> #{cards.map { |c| c.code}} --  #{prev_card} --  #{total_score} -- #{prev_iter}"
-    return [total_score, prev_iter] if cards == []
-    #reject any further calculation below 5% probability threshold
-    return [total_score, prev_iter] if prev_iter > 0 && prev_iter < 0.05
 
-    if total_score == 0
-      return smart_probability(cards.drop(1), cards[0], 1, 1) if cards[0].plays_after? prev_card
-      return smart_probability(cards.drop(1), cards[0], 0, 0)
-    end
-    prob_of_continuing = 0
+  def smart_probability(cards, prev_card = nil)
+    prev_card ||= @last_card
+    total_score = 0
+    prev_iter   = 1
 
-    if (cards[0].figure == 'skip' && prev_card.figure == 'skip') || cards[0].special_card?
-      prob_of_continuing = 1
-    elsif cards[0].code == prev_card.code
-      prob_of_continuing = 1 #double plays
-    elsif prev_card.figure == 'wild'
-      prob_of_continuing = @proxy.tracker.change_from_wild_probability
-    elsif prev_card.figure == 'wild+4'
-      prob_of_continuing = @proxy.tracker.change_from_wd4_probability cards[0].color
-    elsif prev_card.figure == '+2'
-      #we will not be able to play it only if the next card is wd4 or reverse
-      if cards[0].figure == '+2' || cards[0].color == prev_card.color && cards[0].figure == 'reverse'
+    while cards.length > 0 && prev_iter > 0
+      if total_score == 0
+        if cards[0].plays_after? prev_card
+          total_score = 1
+          prev_iter   = 1
+        else
+          total_score = 0
+          prev_iter   = 0
+        end
+        prev_card   = cards[0]
+        cards = cards.drop(1)
+        next
+      end
+      prob_of_continuing = 0
+      if (cards[0].figure == 'skip' && prev_card.figure == 'skip') || cards[0].special_card?
+        prob_of_continuing = 1
+      elsif cards[0].code == prev_card.code
+        prob_of_continuing = 1 #double plays
+      elsif prev_card.figure == 'wild'
+        prob_of_continuing = @proxy.tracker.change_from_wild_probability
+      elsif prev_card.figure == 'wild+4'
         prob_of_continuing = @proxy.tracker.change_from_wd4_probability cards[0].color
-      elsif cards[0].color == prev_card.color
-        prob_of_continuing = @proxy.tracker.change_from_plus2_probability cards[0]
+      elsif prev_card.figure == '+2'
+        #we will not be able to play it only if the next card is wd4 or reverse
+        if cards[0].figure == '+2' || cards[0].color == prev_card.color && cards[0].figure == 'reverse'
+          prob_of_continuing = @proxy.tracker.change_from_wd4_probability cards[0].color
+        elsif cards[0].color == prev_card.color
+          prob_of_continuing = @proxy.tracker.change_from_plus2_probability cards[0]
+        else
+          prob_of_continuing = @proxy.tracker.successive_probability cards[0], prev_card
+        end
+      elsif cards[0].color == prev_card.color || (cards[0].figure=='+2' && prev_card.figure == '+2') #same color, different figure
+        prob_of_continuing = @proxy.tracker.color_change_probability cards[0]
+      elsif cards[0].figure == prev_card.figure
+        prob_of_continuing = @proxy.tracker.figure_change_probability cards[0]
       else
         prob_of_continuing = @proxy.tracker.successive_probability cards[0], prev_card
+        #nothing in common, not much chance
       end
-    elsif cards[0].color == prev_card.color || (cards[0].figure=='+2' && prev_card.figure == '+2') #same color, different figure
-      prob_of_continuing = @proxy.tracker.color_change_probability cards[0]
-    elsif cards[0].figure == prev_card.figure
-      prob_of_continuing = @proxy.tracker.figure_change_probability cards[0]
-    else
-      prob_of_continuing = @proxy.tracker.successive_probability cards[0], prev_card
-      #nothing in common, not much chance
+      prev_card   =  cards[0]
+      cards       =  cards.drop(1)
+      total_score += prev_iter*prob_of_continuing
+      prev_iter   =  prev_iter*prob_of_continuing
     end
-    debug "tracker probability #{prob_of_continuing}"
-    return smart_probability(cards.drop(1), cards[0], total_score + prev_iter*prob_of_continuing, prev_iter*prob_of_continuing)
+    return [total_score, prev_iter]
   end
 
 
@@ -711,7 +722,7 @@ class Bot
       best_permutation = []
       @hand.permutation(@hand.length) { |p|
         next unless p[0].plays_after? @last_card
-        probability_output = smart_probability(p, @last_card)
+        probability_output = smart_probability_iter(p)
         debug "Before: #{probability_output}"
         probability_score = special_card_penalty(p, probability_output)
         debug "After: #{probability_score}"
