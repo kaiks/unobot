@@ -722,7 +722,7 @@ class Bot
       best_permutation = []
       @hand.permutation(@hand.length) { |p|
         next unless p[0].plays_after? @last_card
-        probability_output = smart_probability_iter(p)
+        probability_output = smart_probability(p)
         debug "Before: #{probability_output}"
         probability_score = special_card_penalty(p, probability_output)
         debug "After: #{probability_score}"
