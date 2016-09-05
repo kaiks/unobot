@@ -254,7 +254,7 @@ class Bot
       start = reverses.playable_after @last_card
 	  return [] unless start.length > 1
       continuation = reverses.select{|c| offensive_cards.map{|o| o.color}.include? c.color}
-      continuation = continuation.group_by{ |i| i.to_code }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
+      continuation = continuation.group_by{ |i| i.to_s }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
       if continuation.length > 0
         return [start[0], start[1], continuation[0][0], continuation[0][1],
                            offensive_cards.find{|c| c.plays_after? UnoCard.parse(continuation[0][0]) }]
