@@ -7,10 +7,10 @@ module Uno
 
 
 
-  STANDARD_FIGURES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, '+2', 'reverse', 'skip']
+  STANDARD_FIGURES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, :plus2, :reverse, :skip]
   STANDARD_SHORT_FIGURES = %w(0 1 2 3 4 5 6 7 8 9 +2 r s)
 
-  SPECIAL_FIGURES = ['wild+4', 'wild']
+  SPECIAL_FIGURES = [:wild4, :wild]
   SPECIAL_SHORT_FIGURES = ['wd4', 'w']
 
   FIGURES = STANDARD_FIGURES + SPECIAL_FIGURES

@@ -58,12 +58,12 @@ class Tracker
 
   def change_from_wd4_probability color
     @prob_cache[2000+ Uno::COLORS.index(color)] ||= 1.0 -
-        (@stack.select{|c| c.figure == 'wild+4' || c.figure=='reverse' && c.color==color}.length.to_f/stack_size)
+        (@stack.select{|c| c.figure == :wild4 || c.figure==:reverse && c.color==color}.length.to_f/stack_size)
   end
 
   def change_from_plus2_probability card
     @prob_cache[3000+card.code] ||= 1.0 -
-        (@stack.select{|c| c.figure == 'wild+4' || c.figure == '+2' || c.figure=='reverse' && c.color==card.color}.length.to_f/stack_size)
+        (@stack.select{|c| c.figure == :wild4 || c.figure == :plus2 || c.figure==:reverse && c.color==card.color}.length.to_f/stack_size)
   end
 
   def color_change_probability card

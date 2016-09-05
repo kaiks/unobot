@@ -61,7 +61,7 @@ class Hand < Array
   end
 
   def select &block
-    return Hand.new(super.select { block } )
+    return super.select { block }
   end
 
   def playable_after card
@@ -104,13 +104,13 @@ class Hand < Array
 
   def remove_cards!(cards)
     cards.each {|card|
-      i = index{ |c| c.to_s == card.to_s }
+      i = index{ |c| c.code == card.code }
       slice! i unless i.nil?
     }
   end
 
   def remove_card!(card)
-    i = index{ |c| c.to_s == card.to_s }
+    i = index{ |c| c.code == card.code }
     slice! i unless i.nil?
   end
 

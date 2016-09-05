@@ -30,7 +30,7 @@ class UnoCard
   end
 
   def ==(card)
-    @figure.to_s == card.figure.to_s and @color == card.color
+    figure == card.figure and color == card.color
   end
 
   def self.parse(card_text)
@@ -139,7 +139,7 @@ class UnoCard
 
 
   def valid_color?
-    Uno::COLORS.member? @color
+    Uno::COLORS.member? color
   end
 
 def self.valid_color? color
@@ -147,7 +147,7 @@ def self.valid_color? color
   end
 
   def valid_figure?
-    Uno::FIGURES.member? @figure
+    Uno::FIGURES.member? figure
   end
 
   def self.valid_figure? figure
@@ -156,30 +156,30 @@ def self.valid_color? color
 
   def special_card?
     #Uno::SPECIAL_FIGURES.member?(@figure)
-    @figure == 'wild+4' || @figure == 'wild'
+    figure == :wild4 || figure == :wild
     #23.97
   end
 
   def special_valid_card?
-    Uno::COLORS.member?(@color) && special_card?
+    Uno::COLORS.member?(color) && special_card?
   end
 
   def valid?
-    color_valid? && Uno::FIGURES.member?(@figure)
+    color_valid? && Uno::FIGURES.member?(figure)
   end
 
   def color_valid?
-    @color == :green || @color == :red || @color == :blue || @color == :yellow || @color == :wild
+    color == :green || color == :red || color == :blue || color == :yellow || color == :wild
   end
 
   def is_offensive?
-    ['+2', 'wild+4'].member? @figure
+    [:plus2, :wild4].member? figure
   end
 
   def offensive_value
-    if @figure == '+2'
+    if figure == :plus2
       2
-    elsif @figure == 'wild+4'
+    elsif figure == :wild4
       4
     else
       0
@@ -188,11 +188,11 @@ def self.valid_color? color
 
 
   def is_war_playable?
-    ['+2', 'reverse', 'wild+4'].member? @figure
+    [:plus2, :reverse, :wild4].member? figure
   end
 
   def plays_after?(card)
-    (@color == :wild) || (card.color == :wild) || card.figure == @figure || card.color == @color || (self.special_valid_card?)
+    (color == :wild) || (card.color == :wild) || card.figure == figure || card.color == color
   end
 
   def is_regular?
@@ -201,16 +201,16 @@ def self.valid_color? color
 
   def value
     return 50 if special_valid_card?
-    return @figure if figure.is_a? Fixnum
+    return figure if figure.is_a? Fixnum
     return 20
   end
 
   def playability_value
-    return -10 if @figure == 'wild+4'
+    return -10 if figure == :wild4
     return -5 if special_valid_card?
     return -3 if is_offensive?
     return -2 if is_war_playable?
-    return @figure if figure.is_a? Fixnum
+    return figure if figure.is_a? Fixnum
     return 0 #if skip
   end
 
