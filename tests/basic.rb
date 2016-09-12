@@ -46,8 +46,8 @@ class TestStrategy < Test::Unit::TestCase
     path_s = path[2].map{|c| c.to_s}.to_s
 
     assert(
-        path_s == ["g1", "gs", "g3", "w", "r5", "r+2", "b7"].to_s ||
-        path_s == ["g3", "gs", "g1", "w", "r5", "r+2", "b7"].to_s,
+        path_s == ["g1", "gs", "g3", "w", "r+2", "r5", "b7"].to_s ||
+        path_s == ["g3", "gs", "g1", "w", "r+2", "r5", "b7"].to_s,
         "Wrong path: #{path_s}"
     )
 
