@@ -285,12 +285,12 @@ class Bot
   def get_wild_color_heuristic
     #Get color list. Make them into [color, no. of cards with that color] array.
     #Find the largest number in such a couple. Return the color that is matched.
-    best_color = @hand.wild
+    best_color = @hand.select{ |c| !c.special_card? }
     if best_color.length > 0
         best_color = best_color.group_by{|c| c.color}.map{|k,v| [k,v.length]}.
         max{|x,y| x[1]<=>y[1]}[0]
     else
-      Uno.random_color
+      Uno.random_normal_color
     end
   end
 
@@ -338,7 +338,7 @@ class Bot
 
   def best_chain_color p = nil
     debug 'Getting best chain color'
-    p ||= get_longest_path(UnoCard.new(:wild, 'wild'))
+    p ||= get_longest_path(UnoCard.new(:wild, :wild))
     if p.exists_and_has 1
       debug "Apparently it's #{p[0].color}"
       return p[0].color if p[0].color != :wild
@@ -353,7 +353,6 @@ class Bot
     @hand.push(c)
     if c.plays_after? @last_card
       if c.special_card?
-
         if has_one_card_or_late_game?
           c.set_wild_color get_wild_color_heuristic
           return play c
