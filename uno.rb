@@ -26,6 +26,8 @@ module Uno
     short_color = short_color.downcase
     if SHORT_COLORS.member? short_color
       COLORS[SHORT_COLORS.find_index short_color]
+    elsif short_color == 'w'
+      :wild
     else
       throw 'not a valid color: ' + short_color.to_s
     end
@@ -37,8 +39,10 @@ module Uno
     if SHORT_FIGURES.member? short_figure
       return FIGURES[SHORT_FIGURES.find_index short_figure]
     else
-      if short_figure == '*' || short_figure == 'wd4' || short_figure == 'w' || short_figure == 'wd'
-        return 'wild'
+      if short_figure == '*' || short_figure == 'w'
+        return :wild
+      elsif short_figure == 'wd4' || short_figure == 'wd'
+        return :wild4
       else
         throw 'not a valid figure: ' + short_figure.to_s
       end

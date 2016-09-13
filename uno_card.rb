@@ -4,24 +4,22 @@ class UnoCard
   include Uno
 
   attr_reader :color, :figure, :code
-  attr_accessor :visited, :debug
+  attr_accessor :visited
 
   def self.debug text
-    puts text if @debug
+    puts text if $DEBUG
   end
 
   def initialize(color, figure)
     figure = figure.downcase if figure.is_a? String
     color = color.downcase if color.is_a? String
-    throw 'Wrong color' unless Uno::COLORS.include? color
-    throw 'Wrong figure' unless Uno::FIGURES.include? figure
+    throw "Wrong color #{color}" unless Uno::COLORS.include? color
+    throw "Wrong figure: #{figure}" unless Uno::FIGURES.include? figure
 
     @color = color
     @figure = figure
     @code = Uno::CARD_CODES[to_s]
     @visited = 0
-    @debug = false
-
     throw "Not a valid card #{@color} #{@figure}" unless valid?
   end
 
@@ -35,8 +33,8 @@ class UnoCard
 
   def self.parse(card_text)
     card_text.downcase!
-
-    return UnoCard.parse_wild(card_text) if card_text[0] == 'w'
+    debug "[parse] Parsing #{card_text}"
+    return UnoCard.parse_wild(card_text) if card_text[1] == 'w' || card_text[0] == 'w'
 
     short_color = card_text[0]
     short_figure = card_text[1..2]
@@ -48,13 +46,10 @@ class UnoCard
 
   def self.parse_wild(card_text)
     debug "[parse_wild] Parsing #{card_text}"
-    color = :wild
+    color = Uno.expand_color(card_text[0])
     short_figure = 'w'
-    if card_text[1] != 'w'
-      short_figure = 'wd4' if card_text[1..2] == 'd4'
-      if card_text[-1] != '4'
-        color = Uno.expand_color(card_text[-1])
-      end
+    if card_text.length > 2
+      short_figure = 'wd4' if (card_text[1..2] == 'd4' || card_text[2..3] == 'd4')
     end
     figure = Uno.expand_figure(short_figure)
     UnoCard.new(color, figure)

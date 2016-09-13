@@ -61,7 +61,7 @@ class Hand < Array
   end
 
   def select &block
-    return super.select { block }
+    Hand.new(super.select(&block))
   end
 
   def playable_after card

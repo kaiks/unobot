@@ -250,7 +250,7 @@ class Bot
     if start.length > 0 && bridges.length > 0
       return [start[0], bridges[0], offensive_cards.find{|c| c.plays_after? bridges[0]}]
     else
-      reverses = @hand.select{|c| c.figure==:reverse}
+      reverses = @hand.reverse
       start = reverses.playable_after @last_card
 	  return [] unless start.length > 1
       continuation = reverses.select{|c| offensive_cards.map{|o| o.color}.include? c.color}
@@ -285,8 +285,7 @@ class Bot
   def get_wild_color_heuristic
     #Get color list. Make them into [color, no. of cards with that color] array.
     #Find the largest number in such a couple. Return the color that is matched.
-
-    best_color = @hand.select{|c|!c.special_card?}
+    best_color = @hand.wild
     if best_color.length > 0
         best_color = best_color.group_by{|c| c.color}.map{|k,v| [k,v.length]}.
         max{|x,y| x[1]<=>y[1]}[0]
@@ -325,7 +324,7 @@ class Bot
         return true
       end
 
-      reverses = @hand.select{|c| c.figure==:reverse}
+      reverses = @hand.reverse
       start = reverses.playable_after @last_card
       continuation = reverses.select{|c| c.color != @last_card.color}
       continuation = continuation.group_by{ |i| i.code }.each_with_object({}) { |(k,v), h| h[k] = v if v.length>1 }.to_a
