@@ -241,7 +241,7 @@ class Bot
   #todo: extension to plays: brbr -> rrrr -> rs -> ys -> y+2
   def get_offensive_path
     #Check if we have a chance to play offensive cards at all
-    offensive_cards = @hand.of_figure(:plustwo)
+    offensive_cards = @hand.of_figure(:plus2)
     return [] if offensive_cards.length == 0
     #First attempt: try to build a 0 turn path with skips
     skips = @hand.of_figure(:skip)
@@ -526,7 +526,7 @@ class Bot
       prob_of_continuing = 1
     elsif cards[0].code == prev_card.code || prev_card.color == :wild #aka: figure = old.figure + color = old.color
       prob_of_continuing = 0.9352
-    elsif cards[0].color == prev_card.color || (cards[0].figure==:plustwo && prev_card.figure == :plustwo) #same color, different figure
+    elsif cards[0].color == prev_card.color || (cards[0].figure==:plus2 && prev_card.figure == :plus2) #same color, different figure
       prob_of_continuing = 0.88
     elsif cards[0].figure == prev_card.figure
       prob_of_continuing = 0.72
@@ -566,16 +566,16 @@ class Bot
         prob_of_continuing = @proxy.tracker.change_from_wild_probability
       elsif prev_card.figure == :wild4
         prob_of_continuing = @proxy.tracker.change_from_wd4_probability cards[0].color
-      elsif prev_card.figure == :plustwo
+      elsif prev_card.figure == :plus2
         #we will not be able to play it only if the next card is wd4 or reverse
-        if cards[0].figure == :plustwo || cards[0].color == prev_card.color && cards[0].figure == :reverse
+        if cards[0].figure == :plus2 || cards[0].color == prev_card.color && cards[0].figure == :reverse
           prob_of_continuing = @proxy.tracker.change_from_wd4_probability cards[0].color
         elsif cards[0].color == prev_card.color
           prob_of_continuing = @proxy.tracker.change_from_plus2_probability cards[0]
         else
           prob_of_continuing = @proxy.tracker.successive_probability cards[0], prev_card
         end
-      elsif cards[0].color == prev_card.color || (cards[0].figure==:plustwo && prev_card.figure == :plustwo) #same color, different figure
+      elsif cards[0].color == prev_card.color || (cards[0].figure==:plus2 && prev_card.figure == :plus2) #same color, different figure
         prob_of_continuing = @proxy.tracker.color_change_probability cards[0]
       elsif cards[0].figure == prev_card.figure
         prob_of_continuing = @proxy.tracker.figure_change_probability cards[0]
@@ -603,7 +603,7 @@ class Bot
       turns_left = turns_required(cards_left)
       next_card = cards_left == [] ? UnoCard.parse('wd4') : cards[i+1]
       penalty_divisor = 1000000000 - 100000000 + rand(100000000)
-      penalty_divisor -= 100000000 if c.figure == :reverse || c.figure==:plustwo
+      penalty_divisor -= 100000000 if c.figure == :reverse || c.figure==:plus2
       if c.figure == :wild4
         penalty_divisor = 1.05*(i+1)
         penalty_divisor += 0.15
@@ -622,9 +622,9 @@ class Bot
         penalty_divisor += 0.5 if non_wild_count <= 1
 
         penalty_divisor += 0.45 if score[1] > 0.75
-      elsif c.figure == :plustwo
+      elsif c.figure == :plus2
         playable_after = cards_left.select { |card| card.plays_after? c }
-        if score[1] < 0.75
+        if score[1] < 0.5
           penalty_divisor = 8
         else
           if i == (len-2) && playable_after.length == 1
@@ -635,6 +635,7 @@ class Bot
         end
       elsif c.figure == :reverse
         penalty_divisor = 15
+=begin
       elsif c.figure == :skip
         playable_after = cards_left.select { |card| card.plays_after? c }
         other_skips = playable_after.select { |card| card.figure == :skip }
@@ -646,23 +647,26 @@ class Bot
         #we premium skips if the next card is the only non wild
         if unique_non_wilds.length == 1 && other_skips.length == 0 && (next_card.plays_after?(c) && next_card.figure != :skip && !next_card.special_card?)
         penalty_divisor = -1
-        elsif unique_non_wilds.length > 1 || (unique_non_wilds.length == 1 && next_card.code != unique_non_wilds[0].code)
-          penalty_divisor = 5
-        end
+      elsif unique_non_wilds.length > 1 || (unique_non_wilds.length == 1 && next_card.code != unique_non_wilds[0].code)
+        penalty_divisor = 5
+      end
+=end
       end
       turns_left += 1
 
       penalty = (turns_left) / penalty_divisor.to_f
-      penalty = -1 / turns_left.to_f if penalty < 0
-      debug "#{cards_left}"
+      penalty = -1.0 / turns_left.to_f if penalty < 0
+      debug "#{cards_left.map{|c| c.to_s}.join(' ')}"
       debug "TL:#{turns_left} PD#{penalty_divisor.to_f} Card #{i} #{c} removing #{penalty}"
       score[0] -= penalty
     }
-    turn_multiplier = 1.0-0.15*turns_required(cards)
-    turn_multiplier = 0.1 if turn_multiplier < 0
-    debug "b4 multi: #{score[0]} after: #{score * turn_multiplier}"
+    #turn_multiplier = 1.0-0.25*turn_score_b(cards)/100.0
+    #turn_multiplier = 0.1 if turn_multiplier < 0
+    turn_multiplier = turn_score_b cards
+    debug turn_multiplier
+    debug "b4 multi: #{score[0]} after: #{score[0] + 100 * turn_multiplier}"
 
-    return score[0] * turn_multiplier
+    return score[0] + 100*turn_multiplier
   end
 
 
@@ -715,6 +719,60 @@ class Bot
     return counter
   end
 
+#  n cards:
+# 1. divide the interval into n equal parts
+# 2. score is 1 for 1 turn
+# 3. score is 0 for n turns
+#   4. score is between (n-k)/n and (n-k+1)/n for k turns
+#     4.b for a score between (n-k)/n and (n-k+1)/n, it's: (n-k)/n + score(the rest)/10
+
+  def turn_score_b(hand = nil)
+    hand ||= @hand
+    counter = 0
+    previous_card = @last_card
+    scores = []
+    hand.each_with_index { |c,i|
+      if counter == 0
+        counter += 1
+        counter -= 0.1 if c.special_card?
+        previous_card = c
+        scores.push(hand.length - i)
+        next
+      end
+
+      if c.code == previous_card.code
+        next
+      end
+      if previous_card.figure == :skip && (c.color == previous_card.color || c.figure == :skip)
+        previous_card = c
+        next
+      end
+      if c.special_card?
+        if c.is_offensive?
+          counter += 0.25
+        else
+          counter += 0.50
+        end
+        previous_card = c
+        scores.push(hand.length - i)
+        next
+      end
+      previous_card = c
+      counter += 1
+      scores.push(hand.length - i)
+    }
+
+    return counter*0+calculate_score(scores)
+  end
+
+  def calculate_score scores
+    n = scores[0]
+    k = scores.length
+    return 0.0 if n == k
+    return 1.0 if k == 1
+
+    return (n-k)*1.0/n*1.0 + calculate_score(scores.drop(1))/10.0
+  end
 
   def calculate_best_path_by_probability_chain
     if @hand.length < 10

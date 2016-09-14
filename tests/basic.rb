@@ -4,7 +4,6 @@ require 'test/unit'
 
 
 class TestStrategy < Test::Unit::TestCase
-
   def setup
     @proxy = UnoProxy.new(nil)
     @bot = Bot.new(@proxy, 0)
@@ -130,6 +129,15 @@ class TestStrategy < Test::Unit::TestCase
         "Deleting failed")
 
     assert_equal(@bot.play_by_value.to_s,'wd4b')
+  end
+
+  def test_turn_order
+    @bot.hand.from_text ['b9', 'bs', 'y8', 'y9', 'ys']
+    @bot.last_card = UnoCard.parse('b8')
+    path = @bot.calculate_best_path_by_probability_chain
+    path_s = path[2].map{|c| c.to_s}.to_s
+    assert_equal(path_s,['y8', 'y9', 'ys', 'bs', 'b9'].to_s,
+                 "Wrong path: #{path_s}")
   end
 
 

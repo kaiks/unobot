@@ -77,7 +77,7 @@ class Tracker
   end
 
   def successive_probability current, previous
-    @prob_cache[6000+current.code+previous.code] ||= @stack.
+    @prob_cache[9000+current.code*1000+previous.code] ||= @stack.
         select{|c| (c.plays_after? previous) && (current.plays_after? c)}.length.to_f/stack_size
   end
 end
