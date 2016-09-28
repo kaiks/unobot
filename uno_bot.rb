@@ -1,16 +1,15 @@
 #required gems:
 #cinch
 #sequel
-
 require 'cinch'
+require 'thread'
+require './misc.rb'
+require './config.rb'
 require_relative 'uno_parser.rb'
 require_relative 'pts_ratio_checker.rb'
 
 
-LAG_DELAY = 0.3      #sec
-BOT_NICK = 'unobot'
-
-$DEBUG = true
+$lock = true
 
 $last_turn_message = Time.now+2
 $last_acted_on_turn_message = Time.now
@@ -24,13 +23,17 @@ proxy.bot = bot
 
 $bot = Cinch::Bot.new do
   configure do |c|
-    c.server = 'localhost'
-    c.channels = ['#kx']
-    c.nick = BOT_NICK
-    c.host_nicks = ['ZbojeiJureq', 'ZbojeiJureq_', 'ZbojeiJureq__']
-    c.admin_nicks = ['kx', 'kaiks']
-    c.messages_per_second = 100000 if c.server == 'localhost'
-    c.server_queue_size = 10000000 if c.server == 'localhost'
+    c.server              = Config::SERVER
+    c.channels            = Config::CHANNELS
+    c.nick                = Config::NICK
+    c.host_nicks          = Config::HOST_NICKS
+    c.admin_nicks         = Config::ADMIN_NICKS
+    c.messages_per_second = Config::MESSAGES_PER_SECOND
+
+    if c.server == 'localhost'
+      c.messages_per_second = 100000
+      c.server_queue_size   = 100000
+    end
   end
 
   on :message do |m|
@@ -40,24 +43,21 @@ $bot = Cinch::Bot.new do
     proxy.parse_main(m.user.nick, m.message)
     if m.message =~ /\.uno/
       $bot.nick = BOT_NICK unless $bot.nick == BOT_NICK
-		  last_creator = m.user.nick
+      last_creator = m.user.nick
     end
 
     if m.message == 'pa'
       proxy.reset_game_state
-      return
     end
 
     if m.message == 'unobot'
       autojoin = !autojoin
       m.reply "Uno autojoin = #{autojoin ? 'on' : 'off'}"
-      return
       #m.reply 'jo'
     end
 
     if m.message == 'ha'
       m.reply bot.hand.to_s
-      return
     end
 
     if m.message.include? 'Ok - created'
@@ -81,9 +81,6 @@ $bot = Cinch::Bot.new do
       load 'uno_ai.rb'
       m.reply 'ca'
     end
-
-
-
   end
 
   on :notice do |m|
@@ -91,21 +88,22 @@ $bot = Cinch::Bot.new do
       if m.message.include? 'draw'
         t = m.message.split(':')
         proxy.drawn_card(t[1])
-        sleep(LAG_DELAY)
         proxy.get_message_queue.each { |i| @bot.Channel($bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
       else
-        while $last_acted_on_turn_message == $last_turn_message || proxy.lock == 1
-          sleep(LAG_DELAY)
-          puts 'Waiting for the message...'
+        sleep(LAG_DELAY)
+        while $lock == true
+          debug 'Waiting for the message...'
+          sleep(1)
         end
         proxy.parse_hand(m.message)
         bot.play_by_value
         sleep(LAG_DELAY)
         proxy.get_message_queue.each { |i| @bot.Channel($bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
+        debug 'Setting the lock.'
+        $lock = true
       end
-      #{ proxy.get_message_queue.each { |item| m.reply item } }
     end
 
   end

@@ -54,6 +54,10 @@ module Uno
     COLORS[rand 4]
   end
 
+  def self.random_normal_color
+    NORMAL_COLORS[rand 4]
+  end
+
   CARD_CODES = {
     "b+2"=>0,
     "b0"=>1,

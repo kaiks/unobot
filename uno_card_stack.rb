@@ -38,8 +38,3 @@ class CardStack < Hand
 
 
 end
-
-cs = CardStack.new
-cs.fill
-puts cs
-puts cs.length

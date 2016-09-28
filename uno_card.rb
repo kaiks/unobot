@@ -32,9 +32,9 @@ class UnoCard
   end
 
   def self.parse(card_text)
-    card_text.downcase!
+    card_text = card_text.downcase
     debug "[parse] Parsing #{card_text}"
-    return UnoCard.parse_wild(card_text) if card_text[1] == 'w' || card_text[0] == 'w'
+    return UnoCard.parse_wild(card_text) if (card_text[1] == 'w' || card_text[0] == 'w')
 
     short_color = card_text[0]
     short_figure = card_text[1..2]
@@ -150,9 +150,7 @@ def self.valid_color? color
   end
 
   def special_card?
-    #Uno::SPECIAL_FIGURES.member?(@figure)
     figure == :wild4 || figure == :wild
-    #23.97
   end
 
   def special_valid_card?
@@ -187,7 +185,7 @@ def self.valid_color? color
   end
 
   def plays_after?(card)
-    (color == :wild) || (card.color == :wild) || card.figure == figure || card.color == color
+    (color == :wild) || (card.color == :wild) || card.figure == figure || card.color == color || special_card?
   end
 
   def is_regular?

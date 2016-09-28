@@ -3,7 +3,7 @@
 #gem install jdbc-sqlite3
 #require 'jdbc-sqlite3'
 
-require 'sequel'
+#require 'sequel'
 
 =begin
 Makes sure that the 33% ratio rule is obeyed
@@ -24,8 +24,8 @@ select count(game) from player_action pa where pa.action = 0 and pa.player = 'ca
 
 =end
 
-$db = Sequel.connect(
-    'jdbc:sqlite:uno.db') # need to set the driver
+#$db = Sequel.connect(
+#    'jdbc:sqlite:uno.db') # need to set the driver
 
 
 
