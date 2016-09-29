@@ -1,4 +1,6 @@
 require_relative '../uno_ai.rb'
+require_relative '../config.rb'
+require_relative '../misc.rb'
 require_relative '../uno_parser.rb'
 require 'test/unit'
 
@@ -13,7 +15,7 @@ class TestStrategy < Test::Unit::TestCase
     @bot.last_card = UnoCard.parse('g0')
     @proxy.tracker.reset
     @proxy.tracker.new_adversary 'Testing'
-    @proxy.reset_game_state
+    @proxy.game_state.reset
   end
 
 

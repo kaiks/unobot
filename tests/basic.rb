@@ -14,7 +14,7 @@ class TestStrategy < Test::Unit::TestCase
     @bot.last_card = UnoCard.parse('g0')
     @proxy.tracker.reset
     @proxy.tracker.new_adversary 'Testing'
-    @proxy.reset_game_state
+    @proxy.game_state.reset
   end
 
   def prepare_tracker

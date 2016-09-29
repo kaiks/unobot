@@ -24,3 +24,7 @@ class NilClass
     false
   end
 end
+
+module Misc
+  NICK_REGEX = /([a-z_\-\[\]\\^{}|`][a-z0-9_\-\[\]\\^{}|`]{1,15})'s/i
+end

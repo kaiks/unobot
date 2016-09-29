@@ -41,13 +41,6 @@ class Bot
     @turns_required_cache = {}
   end
 
-  def reset_hand
-    @hand.each { |x| @hand.destroy(x) }
-  end
-
-  def set_debug(n)
-    $DEBUG_LEVEL = n
-  end
 
   def play(card)
     @proxy.add_message("pl #{card}")
@@ -60,30 +53,17 @@ class Bot
     @hand.destroy(card)
   end
 
-  def draw_n_fake(n)
-    @hand.add_random(n)
-  end
-
-  def draw_fake
-    puts 'pe'
-    puts 'pa'
-    draw_n_fake(1)
-  end
 
   def draw
     debug 'Draw function', 2
-    if game_has_state WAR
+    if game_state.war!
       debug '(We are in the war state)', 2
       @proxy.add_message('pa')
-      @proxy.reset_game_state
     else
       @proxy.add_message('pe')
     end
   end
 
-  def in_war?
-    game_has_state(WAR) || game_has_state(WARWD)
-  end
 
   def default_adversary
     tracker.default_adversary
@@ -92,6 +72,10 @@ class Bot
   def more_cards_than_adversary? adversary = nil
     adversary ||= default_adversary
     @hand.size > adversary.card_count
+  end
+
+  def game_state
+    @proxy.game_state
   end
 
 #todo: change color normally when last few cards include w by adversary
@@ -105,7 +89,7 @@ class Bot
       return play_predefined_path
     end
 
-    if @last_card.special_card? && @proxy.last_player!=$bot.nick && !in_war? && more_cards_than_adversary?
+    if @last_card.special_card? && @proxy.last_player!=$bot.nick && !@proxy.in_war? && more_cards_than_adversary?
       random_threshold = 6
       randomly_change_color = rand(10) < random_threshold
       with_wd4 = true
@@ -118,7 +102,7 @@ class Bot
     end
 
     #todo: export that to play_aggressive and integrate with what's below
-    if has_one_card_or_late_game? && !game_has_state(WAR) && (@hand.size >= ALGORITHM_CARD_NO_THRESHOLD || @last_card.special_card? && @proxy.last_player!=$bot.nick)
+    if has_one_card_or_late_game? && !game_state.war? && (@hand.size >= ALGORITHM_CARD_NO_THRESHOLD || @last_card.special_card? && @proxy.last_player!=$bot.nick)
       playable_cards = @hand.playable_after(@last_card).offensive
       if playable_cards.length > 0
         if playable_cards[0].special_card?
@@ -135,12 +119,12 @@ class Bot
     end
 
 
-    debug "Game state: #{@proxy.game_state}"
+    debug "Game state: #{game_state}"
     if @hand.size < ALGORITHM_CARD_NO_THRESHOLD
       #longest_path = get_longest_path(@last_card)
-      longest_path = calculate_best_path_by_probability_chain unless game_has_state WAR
+      longest_path = calculate_best_path_by_probability_chain unless game_state.in_war?
 
-      if @proxy.game_state < WAR && path_valid?(longest_path)
+      if game_state.clean? && path_valid?(longest_path)
         debug "[play_by_value] Normal best path: #{longest_path}"
         next_card = longest_path[2][0]
         unless longest_path[2][1].nil?
@@ -159,13 +143,13 @@ class Bot
 
 
     playable_cards = @hand.playable_after @last_card
-    debug "Top card: #{@last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{@proxy.game_state}"
+    debug "Top card: #{@last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state}"
 
     playable_cards.sort_by! { |x| -(x.value%10) }
 
 
     #both players have one card
-    if game_has_state(ONE_CARD) && path_valid?(longest_path) && turn_score(longest_path[2]) < 2 && longest_path[2].size == @hand.size && !game_has_state(WAR)
+    if game_state.one_card? && path_valid?(longest_path) && turn_score(longest_path[2]) < 2 && longest_path[2].size == @hand.size && !game_state.in_war?
       debug 'We are assuming that we can end the game right now.'
       playable_cards[0].set_wild_color best_chain_color if playable_cards[0].special_card?
       return play playable_cards[0]
@@ -173,10 +157,10 @@ class Bot
 
     #todo: if can play offensive, play offensive. Otherwise, play wild
     do_nothing = false
-    if game_has_state WAR
+    if game_state.war?
       playable_cards.select! { |c| c.is_war_playable? } #+2 or reverse
-      playable_cards.select! { |c| c.figure == :reverse || c.special_card? } if game_has_state WARWD
-    elsif game_has_state ONE_CARD
+      playable_cards.select! { |c| c.figure == :reverse || c.special_card? } if game_state.warwd?
+    elsif game_state.one_card?
       if @hand.length < 5
         path = calculate_best_path_by_probability_chain
 
@@ -210,13 +194,13 @@ class Bot
       if playable_normal_cards.length > 0
         debug "Playing normal card: #{playable_normal_cards[0]} [should only be here if >=#{ALGORITHM_CARD_NO_THRESHOLD} cards (#{@hand.size}]"
         raise "Tried playing normal card with naive algorithm, while having #{@hand.size} cards. \
-          Should have #{ALGORITHM_CARD_NO_THRESHOLD}" if @hand.size < ALGORITHM_CARD_NO_THRESHOLD && @proxy.game_state == 0
+          Should have #{ALGORITHM_CARD_NO_THRESHOLD}" if @hand.size < ALGORITHM_CARD_NO_THRESHOLD && game_state.clean?
         play playable_normal_cards[0]
       else
         #Non-wild cards should be rejected at this point. The first card should be wild.
         #if playable_special_cards[0].figure == 'wild+4'
 
-        if @proxy.game_state < WARWD
+        if game_state.above_war?
           if turns_required >= 2
             return draw
           end
@@ -234,7 +218,7 @@ class Bot
   end
 
   def has_one_card_or_late_game?
-    game_has_state(ONE_CARD) || default_adversary.card_count <= [1+@proxy.turn_counter/20, 5].min
+    game_state.one_card? || default_adversary.card_count <= [1+@proxy.turn_counter/20, 5].min
   end
 
 #Tries to find offensive path through skips or double reverses.
@@ -376,11 +360,6 @@ class Bot
     end
   end
 
-  def game_has_state(state)
-    debug "[#{caller[0]} -> game_has_state] Checking game state: #{state} (is: #{@proxy.game_state})"
-    (@proxy.game_state & state) == state
-  end
-
   def calculate_color_values
     @color_value = Array.new(4)
     4.times do |color|
@@ -509,36 +488,6 @@ class Bot
 
 
 ##NEW AI
-  def probability(cards, prev_card, total_score = 0, prev_iter = 1)
-    #completion condition
-    debug "prob -> #{cards.map { |c| c.to_s }} --  #{prev_card} --  #{total_score} -- #{prev_iter}", 3
-    return total_score if cards == []
-    #reject any further calculation below 5% probability threshold
-    return total_score if prev_iter > 0 && prev_iter < 0.05
-
-    if total_score == 0
-      return probability(cards.drop(1), cards[0], 1, 1) if cards[0].plays_after? prev_card
-      return probability(cards.drop(1), cards[0], 0, 0)
-    end
-    prob_of_continuing = 0
-
-    if (cards[0].figure == :skip && prev_card.figure == :skip) || cards[0].special_card?
-      prob_of_continuing = 1
-    elsif cards[0].code == prev_card.code || prev_card.color == :wild #aka: figure = old.figure + color = old.color
-      prob_of_continuing = 0.9352
-    elsif cards[0].color == prev_card.color || (cards[0].figure==:plus2 && prev_card.figure == :plus2) #same color, different figure
-      prob_of_continuing = 0.88
-    elsif cards[0].figure == prev_card.figure
-      prob_of_continuing = 0.72
-    else
-      prob_of_continuing = 0.11
-      #nothing in common, not much chance
-    end
-
-    return probability(cards.drop(1), cards[0], total_score + prev_iter*prob_of_continuing, prev_iter*prob_of_continuing)
-  end
-
-
   def smart_probability(cards, prev_card = nil)
     prev_card ||= @last_card
     total_score = 0
@@ -562,7 +511,7 @@ class Bot
       prob_of_continuing = 0.0
       if (c.figure == :skip && prev_card.figure == :skip) || c.special_card?
         prob_of_continuing = 1.0
-      elsif i>0 && prev_card.figure == :skip && prev_card.color == c.color
+      elsif prev_card.figure == :skip && prev_card.color == c.color
         prob_of_continuing = 1.0
       elsif i>2 && cards[i-2].figure == :reverse && cards[i-1].code == cards[i-2].code && c.color==cards[i-1].color
         prob_of_continuing = 1.0
@@ -744,7 +693,7 @@ class Bot
       scores.push(hand.length - i)
     }
 
-    return counter*0+calculate_score(scores)
+    return calculate_score(scores)
   end
 
   def calculate_score scores

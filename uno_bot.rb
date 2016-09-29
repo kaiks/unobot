@@ -47,7 +47,7 @@ $bot = Cinch::Bot.new do
     end
 
     if m.message == 'pa'
-      proxy.reset_game_state
+      proxy.game_state.remove_war
     end
 
     if m.message == 'unobot'
@@ -58,6 +58,11 @@ $bot = Cinch::Bot.new do
 
     if m.message == 'ha'
       m.reply bot.hand.to_s
+    end
+
+    if m.message =~ /^set_debug [0-9]/
+      $DEBUG_LEVEL = m.message.split[1]
+      m.reply 'Ok.'
     end
 
     if m.message.include? 'Ok - created'
@@ -72,10 +77,7 @@ $bot = Cinch::Bot.new do
     end
 
     if m.message =~  /^reload/
-      bot.reset_hand
-      proxy.remove_game_state_flag 1
-      proxy.remove_game_state_flag 2
-      proxy.remove_game_state_flag 4
+      proxy.game_state.reset
       load 'uno_parser.rb'
       load 'uno_card.rb'
       load 'uno_ai.rb'
