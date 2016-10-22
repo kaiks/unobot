@@ -4,7 +4,7 @@
 require 'cinch'
 require 'thread'
 require './misc.rb'
-require './config.rb'
+require './bot_config.rb'
 require_relative 'uno_parser.rb'
 require_relative 'pts_ratio_checker.rb'
 
@@ -23,12 +23,12 @@ proxy.bot = bot
 
 $bot = Cinch::Bot.new do
   configure do |c|
-    c.server              = Config::SERVER
-    c.channels            = Config::CHANNELS
-    c.nick                = Config::NICK
-    c.host_nicks          = Config::HOST_NICKS
-    c.admin_nicks         = Config::ADMIN_NICKS
-    c.messages_per_second = Config::MESSAGES_PER_SECOND
+    c.server              = BotConfig::SERVER
+    c.channels            = BotConfig::CHANNELS
+    c.nick                = BotConfig::NICK
+    c.host_nicks          = BotConfig::HOST_NICKS
+    c.admin_nicks         = BotConfig::ADMIN_NICKS
+    c.messages_per_second = BotConfig::MESSAGES_PER_SECOND
 
     if c.server == 'localhost'
       c.messages_per_second = 100000

@@ -1,7 +1,7 @@
 $DEBUG = false
 $DEBUG_LEVEL = 0
 
-module Config
+module BotConfig
   LAG_DELAY = 0.3      #sec
   NICK = 'unobot'
 

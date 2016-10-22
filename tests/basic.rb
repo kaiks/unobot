@@ -2,7 +2,7 @@ require_relative '../uno_ai.rb'
 require_relative '../uno_parser.rb'
 require 'test/unit'
 
-require '../config'
+require '../bot_config'
 
 class TestStrategy < Test::Unit::TestCase
   def setup
