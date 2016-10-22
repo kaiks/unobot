@@ -24,7 +24,7 @@ class Tracker
     @adversaries[nick].card_count = 7
   end
 
-  def update(text, stack_size)
+  def update(text, war_stack_size)
     split = text.split
     if @adversaries[split[0]].nil?
       debug "Can't update card amount for #{split[0]}"
@@ -34,9 +34,9 @@ class Tracker
     if text.include? 'draws'
       debug "#{split[0]} draws a card." if $debug
       @adversaries[split[0]].draw
-    else
-      debug "#{split[0]} draws #{stack_size} cards." if $debug
-      @adversaries[split[0]].draw stack_size
+    elsif text.include? 'passes' && war_stack_size > 0
+      debug "#{split[0]} draws #{war_stack_size} cards." if $debug
+      @adversaries[split[0]].draw war_stack_size
     end
   end
 

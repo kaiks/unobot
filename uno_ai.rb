@@ -13,7 +13,6 @@ GAME_ON = 0
 ALGORITHM_CARD_NO_THRESHOLD = 8
 
 class Bot
-  attr_accessor :last_card
   attr_accessor :proxy, :hand
   attr_accessor :predefined_path
 
@@ -26,15 +25,19 @@ class Bot
     if autostart == 1
       @hand.add_random(8)
 
-      @last_card = @hand[0]
+      #@last_card = @hand[0]
       puts 'Starting the game with'
-      play(@last_card)
+      #play(@last_card)
 
       puts "Hello. My hand is #{@hand}"
       puts "Hello. My hand is #{@hand.bot_output}"
     else
       puts 'Hello.'
     end
+  end
+
+  def last_card
+    @proxy.top_card
   end
 
   def reset_cache
@@ -80,7 +83,7 @@ class Bot
 
 #todo: change color normally when last few cards include w by adversary
   def play_by_value
-    debug "Top card: #{@last_card}", 2
+    debug "Top card: #{last_card}", 2
     while @proxy.lock == 1
       sleep(0.5)
     end
@@ -89,7 +92,7 @@ class Bot
       return play_predefined_path
     end
 
-    if @last_card.special_card? && @proxy.last_player!=$bot.nick && !@proxy.in_war? && more_cards_than_adversary?
+    if last_card.special_card? && @proxy.previous_player!=$bot.nick && !@proxy.in_war? && more_cards_than_adversary?
       random_threshold = 6
       randomly_change_color = rand(10) < random_threshold
       with_wd4 = true
@@ -102,8 +105,8 @@ class Bot
     end
 
     #todo: export that to play_aggressive and integrate with what's below
-    if has_one_card_or_late_game? && !game_state.war? && (@hand.size >= ALGORITHM_CARD_NO_THRESHOLD || @last_card.special_card? && @proxy.last_player!=$bot.nick)
-      playable_cards = @hand.playable_after(@last_card).offensive
+    if has_one_card_or_late_game? && !game_state.war? && (@hand.size >= ALGORITHM_CARD_NO_THRESHOLD || last_card.special_card? && @proxy.previous_player!=$bot.nick)
+      playable_cards = @hand.playable_after(last_card).offensive
       if playable_cards.length > 0
         if playable_cards[0].special_card?
           playable_cards[0].set_wild_color get_wild_color_heuristic
@@ -121,7 +124,6 @@ class Bot
 
     debug "Game state: #{game_state}"
     if @hand.size < ALGORITHM_CARD_NO_THRESHOLD
-      #longest_path = get_longest_path(@last_card)
       longest_path = calculate_best_path_by_probability_chain unless game_state.in_war?
 
       if game_state.clean? && path_valid?(longest_path)
@@ -142,8 +144,8 @@ class Bot
     end
 
 
-    playable_cards = @hand.playable_after @last_card
-    debug "Top card: #{@last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state}"
+    playable_cards = @hand.playable_after last_card
+    debug "Top card: #{last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state}"
 
     playable_cards.sort_by! { |x| -(x.value%10) }
 
@@ -165,7 +167,7 @@ class Bot
         path = calculate_best_path_by_probability_chain
 
         if path_valid?(path)
-          probability = smart_probability(path[2], @last_card)
+          probability = smart_probability(path[2], last_card)
           if probability[1] >= 0.8 && turns_required(path[2]) <= 2
             do_nothing = true
           end
@@ -230,13 +232,13 @@ class Bot
     return [] if offensive_cards.length == 0
     #First attempt: try to build a 0 turn path with skips
     skips = @hand.of_figure(:skip)
-    start = skips.playable_after @last_card
+    start = skips.playable_after last_card
     bridges = skips.select { |c| offensive_cards.map { |o| o.color }.include? c.color }
     if start.length > 0 && bridges.length > 0
       return [start[0], bridges[0], offensive_cards.find { |c| c.plays_after? bridges[0] }]
     else
       reverses = @hand.of_figure :reverse
-      start = reverses.playable_after @last_card
+      start = reverses.playable_after last_card
       return [] unless start.length > 1
       continuation = reverses.select { |c| offensive_cards.map { |o| o.color }.include? c.color }
       continuation = continuation.group_by { |i| i.to_s }.each_with_object({}) { |(k, v), h| h[k] = v if v.length>1 }.to_a
@@ -251,7 +253,7 @@ class Bot
   def play_predefined_path
     debug "#{@predefined_path}", 2
     raise 'Predefined path is empty' if @predefined_path.length == 0
-    raise 'Predefined path is wrong: can\'t play' unless @predefined_path[0].plays_after? @last_card
+    raise 'Predefined path is wrong: can\'t play' unless @predefined_path[0].plays_after? last_card
     if @predefined_path.length >= 2
       if @predefined_path[0].code == @predefined_path[1].code &&
           !@predefined_path[0].special_card? && !(@predefined_path[0].figure==:skip)
@@ -298,7 +300,7 @@ class Bot
       hand_colors_ordered = hand_color_counts.to_a.sort_by { |x| -x[1] }.map { |c| c[0] }
       stack_colors_ordered = stack_color_counts.to_a.sort_by { |x| x[1] }.map { |c| c[0] }
       c = (hand_colors_ordered + stack_colors_ordered).uniq
-      while c[0] == @last_card.color || c[0] == :wild
+      while c[0] == last_card.color || c[0] == :wild
         c = c.drop(1)
       end
       wilds[0].set_wild_color c[0]
@@ -307,15 +309,15 @@ class Bot
       return true
     else
       skips = @hand.of_figure(:skip)
-      if skips.length > 1 && !skips.of_color(@last_card.color).empty? && !skips.select { |c| c.color != @last_card.color }.empty?
-        @predefined_path = [skips.of_color(@last_card.color)[0], skips.find { |c| c.color != @last_card.color }]
+      if skips.length > 1 && !skips.of_color(last_card.color).empty? && !skips.select { |c| c.color != last_card.color }.empty?
+        @predefined_path = [skips.of_color(last_card.color)[0], skips.find { |c| c.color != last_card.color }]
         debug 'Considering predefined path: ' + @predefined_path.to_s
         return true
       end
 
       reverses = @hand.of_figure :reverse
-      start = reverses.playable_after @last_card
-      continuation = reverses.select { |c| c.color != @last_card.color }
+      start = reverses.playable_after last_card
+      continuation = reverses.select { |c| c.color != last_card.color }
       if continuation.length > 0 && start.length > 1
         @predefined_path = [start[0], start[1], continuation[0]]
         debug 'Considering predefined path: ' + @predefined_path.to_s
@@ -340,7 +342,7 @@ class Bot
   def drawn_card_action c
     debug "[drawn_card_action] Card: #{c}"
     @hand.push(c)
-    if c.plays_after? @last_card
+    if c.plays_after? last_card
       if c.special_card?
         if has_one_card_or_late_game?
           c.set_wild_color get_wild_color_heuristic
@@ -489,7 +491,7 @@ class Bot
 
 ##NEW AI
   def smart_probability(cards, prev_card = nil)
-    prev_card ||= @last_card
+    prev_card ||= last_card
     total_score = 0
     prev_iter = 1
 
@@ -544,7 +546,7 @@ class Bot
         prob_of_continuing = tracker.successive_probability c, prev_card
       end
       debug "#{prob_of_continuing} #{prev_card.to_s} -> #{c.to_s}", 2
-      total_score += prev_iter*prob_of_continuing
+      total_score += 0.1*prev_iter*prob_of_continuing+prob_of_continuing
       prev_iter = prev_iter*prob_of_continuing
     }
     debug "For card set #{cards.map{|c|c.to_s}.to_s}"
@@ -611,7 +613,7 @@ class Bot
   def turns_required(hand = nil)
     hand ||= @hand
     counter = 0
-    previous_card = @last_card
+    previous_card = last_card
     skipped = false
     hand.each_with_index { |c, i|
       previous_card = hand[i-1] if i > 0
@@ -656,7 +658,7 @@ class Bot
   def turn_score_b(hand = nil)
     hand ||= @hand
     counter = 0
-    previous_card = @last_card
+    previous_card = last_card
     scores = []
     hand.each_with_index { |c, i|
       previous_card = hand[i-1] if i > 0
@@ -714,7 +716,7 @@ class Bot
       best_score = 0
       best_permutation = []
       @hand.permutation(@hand.length) { |p|
-        next unless p[0].plays_after? @last_card
+        next unless p[0].plays_after? last_card
         probability_output = smart_probability(p)
         debug "Before: #{probability_output}", 3
         probability_score = special_card_penalty(p, probability_output)

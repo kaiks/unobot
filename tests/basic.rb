@@ -11,7 +11,7 @@ class TestStrategy < Test::Unit::TestCase
     @proxy.bot = @bot
 
     @bot.hand = Hand.new
-    @bot.last_card = UnoCard.parse('g0')
+    @proxy.top_card = UnoCard.parse('g0')
     @proxy.tracker.reset
     @proxy.tracker.new_adversary 'Testing'
     @proxy.game_state.reset
@@ -19,13 +19,13 @@ class TestStrategy < Test::Unit::TestCase
 
   def prepare_tracker
     @proxy.tracker.stack.remove! @bot.hand
-    @proxy.tracker.stack.remove! @bot.last_card
+    @proxy.tracker.stack.remove! @proxy.top_card
     @proxy.tracker.calculate_color_probabilities
   end
 
   def test_skip
     @bot.hand.from_text ['y6', 'ys']
-    @bot.last_card = UnoCard.parse('y4')
+    @proxy.top_card = UnoCard.parse('y4')
 
     prepare_tracker
     path = @bot.calculate_best_path_by_probability_chain
@@ -35,7 +35,7 @@ class TestStrategy < Test::Unit::TestCase
   end
 
   def test_wd4_skip
-    @bot.last_card = UnoCard.parse('b5')
+    @proxy.top_card = UnoCard.parse('b5')
     @bot.hand.from_text ['g6', 'gs', 'gs', 'wd4']
     prepare_tracker
 
@@ -62,11 +62,7 @@ class TestStrategy < Test::Unit::TestCase
   def test_skip_3
     @bot.hand.from_text ['g6', 'g7', 'gs', 'r9', 'wd4', 'y1', 'y7']
     prepare_tracker
-    $DEBUG = true
-    $DEBUG_LEVEL = 3
     path = @bot.calculate_best_path_by_probability_chain
-    $DEBUG = false
-    $DEBUG_LEVEL = 0
     path_s = path[2].map{|c| c.to_s}.to_s
 
     assert_equal(path_s, ["g6", "gs", "g7", "y7", "y1", "wd4", "r9"].to_s,
@@ -153,7 +149,7 @@ class TestStrategy < Test::Unit::TestCase
   def test_wild_7
     puts "Test wild 7"
     @bot.hand.from_text ['wd4', 'gr', 'gr']
-    @bot.last_card = UnoCard.new(:wild, :wild)
+    @proxy.top_card = UnoCard.new(:wild, :wild)
     prepare_tracker
     path = @bot.calculate_best_path_by_probability_chain
     path_s = path[2].map{|c| c.to_s}
@@ -161,9 +157,20 @@ class TestStrategy < Test::Unit::TestCase
                  "Wrong path: #{path_s.to_s}")
   end
 
+  def test_wild_8
+    puts "Test wild 8"
+    @bot.hand.from_text ['y0', 'y5', 'y8', 'ww', 'gs', 'rs', 'ys']
+    @proxy.top_card = UnoCard.parse('g4')
+    prepare_tracker
+    path = @bot.calculate_best_path_by_probability_chain
+    path_s = path[2].map{|c| c.to_s}
+    assert_not_equal(path_s[0],'wg',
+           "Wrong path: #{path_s.to_s}")
+  end
+
   def test_turn_order
     @bot.hand.from_text ['b9', 'bs', 'y8', 'y9', 'ys']
-    @bot.last_card = UnoCard.parse('b8')
+    @proxy.top_card = UnoCard.parse('b8')
     prepare_tracker
     path = @bot.calculate_best_path_by_probability_chain
     path_s = path[2].map{|c| c.to_s}.to_s
@@ -173,7 +180,7 @@ class TestStrategy < Test::Unit::TestCase
 
   def test_one_card_1
     puts "Now testing test_one_card_1"
-    @bot.last_card = UnoCard.parse('r4')
+    @proxy.top_card = UnoCard.parse('r4')
     @bot.hand.from_text ['gs', 'rs', 'rs', 'r+2']
     prepare_tracker
     @bot.proxy.add_game_state_flag ONE_CARD
@@ -181,21 +188,5 @@ class TestStrategy < Test::Unit::TestCase
     assert_equal(card_text, 'rs')
   end
 
-  def test_plus_two_1
-    @bot.hand.from_text ['r5', 'r+2', 'ww']
-    @proxy.tracker.default_adversary.card_count = 3
-    prepare_tracker
-
-
-    #@bot.set_debug 3
-    path = @bot.calculate_best_path_by_probability_chain
-    puts path.to_s
-    path_s = path[2].map{|c| c.to_s}.to_s
-
-    assert(
-        path_s == ["wr", "r+2", "r5"].to_s,
-        "Wrong path: #{path_s}"
-    )
-  end
 
 end

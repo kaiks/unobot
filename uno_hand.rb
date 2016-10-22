@@ -109,16 +109,18 @@ class Hand < Array
     }
   end
 
-  def remove_card!(card)
-    i = index{ |c| c.code == card.code }
-    slice! i unless i.nil?
+  def remove_card!(card, twice = false)
+    (twice ? 2 : 1).times {
+      i = index{ |c| c.code == card.code }
+      slice! i unless i.nil?
+    }
   end
 
-  def remove!(item)
-    if item.class == Hand
+  def remove!(item, twice = false)
+    if item.kind_of? Array
       remove_cards! item
     elsif item.class == UnoCard
-      remove_card! item
+      remove_card!(item, twice)
     end
   end
 

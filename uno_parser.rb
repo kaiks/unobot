@@ -1,11 +1,17 @@
 require_relative 'uno_card.rb'
 require_relative 'uno_ai.rb'
 require_relative 'uno_game_state.rb'
+
+CardAction = Struct.new(:player, :action, :attribute, :previous_card)
+PLAY_ACTION = 0
+PICK_ACTION = 1
+PASS_ACTION = 2
+
 class UnoProxy
-  attr_accessor :bot, :active_player
+  attr_accessor :bot, :active_player, :top_card
   attr_reader :tracker
-  attr_reader :game_state, :lock, :card_history
-  attr_reader :turn_counter, :last_player
+  attr_reader :game_state, :lock, :history#, :top_card
+  attr_reader :turn_counter, :previous_player
 
   def initialize(bot = nil)
     @bot = bot
@@ -13,9 +19,8 @@ class UnoProxy
     @previous_player = nil
     @active_player = nil
     @game_players = []
-    @card_history = []
-    @top_card = []
-    @nick = []
+    @history = []
+    @top_card = nil
     @messages = []
     @not_started = true
     @tracker = Tracker.new
@@ -25,15 +30,6 @@ class UnoProxy
     @turn_counter = 0
   end
 
-
-  def update_game_state(text)
-    if text.include?('raws') || text.include?('passes')
-      adversary_passed = !((text.include? "#{$bot.nick} pass") || (text.include? "#{$bot.nick} draw"))
-      @game_state.update adversary_passed
-      @tracker.update(text, @stack_size)
-      @stack_size = 0
-    end
-  end
 
   def parse_main(nick, text)
     if host? nick
@@ -75,32 +71,25 @@ class UnoProxy
           #always 1 card only, its by host
           card = parse_card_text(card_text)
 
-          @card_history << card
-          @card_history << card if @double_play
+          (@double_play ? 2 : 1).times {
+            @history << CardAction.new(@active_player, PLAY_ACTION, card, @top_card)
+          }
+
+          @tracker.update(text, @stack_size)
+          update_game_state(text, card)
+
 
           @top_card = card
 
-          if @top_card.is_offensive?
-            @game_state.war!
-          end
-
-          if @game_state.war? && @top_card.special_card?
-            @game_state.warwd!
-          end
-
-          update_game_state(text)
 
           unless text.include?('passes')
-            @last_player = @previous_player
             if @previous_player != $bot.nick
-              @tracker.stack.remove! @top_card
-              @tracker.stack.remove! @top_card if @double_play
+              @tracker.stack.remove! @top_card, @double_play
               #bot cards have been removed before!
               @tracker.adversaries[@previous_player].plays @top_card, @double_play unless @previous_player.nil?
             end
           end
 
-          @bot.last_card = @top_card
           #reset double play state
           @double_play = false
           if text.include? $bot.nick
@@ -119,51 +108,28 @@ class UnoProxy
     end
   end
 
-  def initialize_game_variables
-    @game_state.reset
-    @not_started = false
-    @game_start_draw = true
-    @previous_player = nil
-    @active_player = nil
-    @last_player = nil
-    @turn_counter = 0
-    @card_history = []
-  end
 
   def drawn_card c
-    parsed = parse_hand(c, true)
+    parsed = parse_hand(c)
     debug "[drawn_card] Parsed card: #{parsed}"
-    if parsed.length < 2
+    if parsed.length == 1
       bot.drawn_card_action parsed[0]
     end
     @tracker.stack.remove! parsed
   end
 
-  def host? nick
-    $bot.config.host_nicks.member? nick
-  end
 
-  def parse_card_text(card_text)
-    debug "[parse_card_text] #{card_text}"
-    figure = card_text.match(/\[(.*)\]/)[1]
-    color = card_text.match(/\d+/)[0]
-    color = color.to_i
-    debug "[parse_card_text] Parsed figure: #{figure} color: #{color}"
-    UnoCard.parse(extract_color(color).to_s+figure.to_s)
-  end
-
-  def parse_hand(card_text, noreplace = false)
+  def parse_hand(card_text)
     unless card_text.match('c')
       debug '[parse_hand] Got hand, I guess.'
       card_text.strip!
 
       card_texts = card_text.split(3.chr)
       card_texts.delete_if { |ct| ct.to_s == nil.to_s }
-      cards = []
       debug "[parse_hand] card_texts: #{card_texts.join('//')}"
-      cards = card_texts.map{|ct| parse_card_text(ct) }
+      cards = card_texts.map { |ct| parse_card_text(ct) }
       debug "[parse_hand] parsed: #{cards.to_s}"
-      @bot.replace_hand(cards) unless noreplace
+      @bot.hand = Hand.new(cards)
 
       if @game_start_draw
         @game_start_draw = false
@@ -174,6 +140,19 @@ class UnoProxy
     end
   end
 
+
+  def add_message(msg)
+    @messages.push(msg)
+  end
+
+  def get_message_queue
+    msg = @messages
+    @messages = []
+    return msg
+  end
+
+  private
+  # in: number, out: character in rgbyw
   def extract_color(number)
     case number
       when 3
@@ -191,13 +170,53 @@ class UnoProxy
     end
   end
 
-  def add_message(msg)
-    @messages.push(msg)
+  # in: text, out: UnoCard
+  def parse_card_text(card_text)
+    debug "[parse_card_text] #{card_text}"
+    figure = card_text.match(/\[(.*)\]/)[1]
+    color = card_text.match(/\d+/)[0]
+    color = color.to_i
+    debug "[parse_card_text] Parsed figure: #{figure} color: #{color}"
+    UnoCard.parse(extract_color(color).to_s+figure.to_s)
   end
 
-  def get_message_queue
-    msg = @messages
-    @messages = []
-    return msg
+  # in: word, out: bool
+  def host? nick
+    $bot.config.host_nicks.member? nick
   end
+
+  def initialize_game_variables
+    @game_state.reset
+    @not_started = false
+    @game_start_draw = true
+    @previous_player = nil
+    @active_player = nil
+    @turn_counter = 0
+    @card_history = []
+  end
+
+  def update_game_state(text, card = nil)
+    action_nick = text.split[0]
+    action_text = text.split[1]
+
+    if action_text == 'draws' || action_text == 'passes'
+      action = PASS_ACTION
+      if action_text == 'draws' || @stack_size > 0
+        action = PICK_ACTION
+      end
+
+      @game_state.update (action_nick != $bot.nick)
+      @history << CardAction.new(action_nick, action, @stack_size, @top_card)
+      @stack_size = 0
+    elsif !card.nil?
+      if card.is_offensive?
+        @game_state.war!
+      end
+
+      if @game_state.war? && card.special_card?
+        @game_state.warwd!
+      end
+    end
+  end
+
 end
