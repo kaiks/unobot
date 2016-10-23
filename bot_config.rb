@@ -9,5 +9,5 @@ module BotConfig
   ADMIN_NICKS = ['kx', 'kaiks']
   MESSAGES_PER_SECOND = 2
   SERVER = 'localhost'
-  CHANNELS = ['#channel']
+  CHANNELS = ['#kx']
 end

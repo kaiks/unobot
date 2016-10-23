@@ -59,7 +59,7 @@ class Bot
 
   def draw
     debug 'Draw function', 2
-    if game_state.war!
+    if game_state.war?
       debug '(We are in the war state)', 2
       @proxy.add_message('pa')
     else
@@ -145,7 +145,7 @@ class Bot
 
 
     playable_cards = @hand.playable_after last_card
-    debug "Top card: #{last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state}"
+    debug "Top card: #{last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state.game_state}"
 
     playable_cards.sort_by! { |x| -(x.value%10) }
 

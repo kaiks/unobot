@@ -34,7 +34,7 @@ class Tracker
     if text.include? 'draws'
       debug "#{split[0]} draws a card." if $debug
       @adversaries[split[0]].draw
-    elsif text.include? 'passes' && war_stack_size > 0
+    elsif text.include?('passes') && war_stack_size > 0
       debug "#{split[0]} draws #{war_stack_size} cards." if $debug
       @adversaries[split[0]].draw war_stack_size
     end

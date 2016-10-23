@@ -199,7 +199,7 @@ class UnoProxy
     action_nick = text.split[0]
     action_text = text.split[1]
 
-    if action_text == 'draws' || action_text == 'passes'
+    if action_text == 'draws' || action_text == 'passes.' || action_text == 'passes'
       action = PASS_ACTION
       if action_text == 'draws' || @stack_size > 0
         action = PICK_ACTION

@@ -109,3 +109,4 @@ tests/p.html
 tests/performance.rb
 tests/test.rb
 uno.db
+bot_config.rb
