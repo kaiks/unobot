@@ -205,7 +205,7 @@ class UnoProxy
         action = PICK_ACTION
       end
 
-      @game_state.update (action_nick != $bot.nick)
+      @game_state.update_game_state (action_nick != $bot.nick)
       @history << CardAction.new(action_nick, action, @stack_size, @top_card)
       @stack_size = 0
     elsif !card.nil?

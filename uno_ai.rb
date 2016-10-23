@@ -92,7 +92,7 @@ class Bot
       return play_predefined_path
     end
 
-    if last_card.special_card? && @proxy.previous_player!=$bot.nick && !@proxy.in_war? && more_cards_than_adversary?
+    if last_card.special_card? && @proxy.previous_player!=$bot.nick && !game_state.in_war? && more_cards_than_adversary?
       random_threshold = 6
       randomly_change_color = rand(10) < random_threshold
       with_wd4 = true
