@@ -26,17 +26,18 @@ class Tracker
 
   def update(text, war_stack_size)
     split = text.split
-    if @adversaries[split[0]].nil?
+    nick = Misc::NICK_REGEX_PURE.match(split[0])[1]
+    if @adversaries[nick].nil?
       debug "Can't update card amount for #{split[0]}"
       return
     end
 
     if text.include? 'draws'
-      debug "#{split[0]} draws a card." if $debug
-      @adversaries[split[0]].draw
+      debug "#{nick} draws a card." if $debug
+      @adversaries[nick].draw
     elsif text.include?('passes') && war_stack_size > 0
-      debug "#{split[0]} draws #{war_stack_size} cards." if $debug
-      @adversaries[split[0]].draw war_stack_size
+      debug "#{nick} draws #{war_stack_size} cards." if $debug
+      @adversaries[nick].draw war_stack_size
     end
   end
 

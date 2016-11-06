@@ -183,7 +183,7 @@ class TestStrategy < Test::Unit::TestCase
     @proxy.top_card = UnoCard.parse('r4')
     @bot.hand.from_text ['gs', 'rs', 'rs', 'r+2']
     prepare_tracker
-    @bot.proxy.add_game_state_flag ONE_CARD
+    @proxy.game_state.one_card!
     card_text = @bot.play_by_value.to_s
     assert_equal(card_text, 'rs')
   end

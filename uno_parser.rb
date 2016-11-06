@@ -110,7 +110,7 @@ class UnoProxy
 
 
   def drawn_card c
-    parsed = parse_hand(c)
+    parsed = parse_hand(c, true)
     debug "[drawn_card] Parsed card: #{parsed}"
     if parsed.length == 1
       bot.drawn_card_action parsed[0]
@@ -119,7 +119,7 @@ class UnoProxy
   end
 
 
-  def parse_hand(card_text)
+  def parse_hand(card_text, drawn = false)
     unless card_text.match('c')
       debug '[parse_hand] Got hand, I guess.'
       card_text.strip!
@@ -128,9 +128,13 @@ class UnoProxy
       card_texts.delete_if { |ct| ct.to_s == nil.to_s }
       debug "[parse_hand] card_texts: #{card_texts.join('//')}"
       cards = card_texts.map { |ct| parse_card_text(ct) }
-      debug "[parse_hand] parsed: #{cards.to_s}"
-      @bot.hand = Hand.new(cards)
-
+      debug "[parse_hand] parsed: #{cards.to_s}", 2
+      if cards.length == 1 && drawn == true
+        @bot.hand << cards[0]
+      else
+        @bot.hand = Hand.new(cards)
+      end
+      debug "[parse_hand] parsed hand: #{@bot.hand.to_s}"
       if @game_start_draw
         @game_start_draw = false
         @tracker.stack.remove! cards

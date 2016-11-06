@@ -82,7 +82,7 @@ class GameState
   end
 
   def has_state? state
-    debug "[#{caller[0]} -> game_has_state] Checking game state: #{state} (is: #{game_state})"
+    debug "[#{caller[1]} -> #has_state?] Checking game state: #{state} (is: #{game_state})"
     (game_state & state) == state
   end
 

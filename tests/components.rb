@@ -12,7 +12,7 @@ class TestStrategy < Test::Unit::TestCase
     @proxy.bot = @bot
 
     @bot.hand = Hand.new
-    @bot.last_card = UnoCard.parse('g0')
+    @proxy.top_card = UnoCard.parse('g0')
     @proxy.tracker.reset
     @proxy.tracker.new_adversary 'Testing'
     @proxy.game_state.reset

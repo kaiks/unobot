@@ -103,7 +103,6 @@ class Bot
         end
       end
     end
-
     #todo: export that to play_aggressive and integrate with what's below
     if has_one_card_or_late_game? && !game_state.war? && (@hand.size >= ALGORITHM_CARD_NO_THRESHOLD || last_card.special_card? && @proxy.previous_player!=$bot.nick)
       playable_cards = @hand.playable_after(last_card).offensive
@@ -143,7 +142,6 @@ class Bot
       end
     end
 
-
     playable_cards = @hand.playable_after last_card
     debug "Top card: #{last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state.game_state}"
 
@@ -178,7 +176,6 @@ class Bot
       playable_cards.select! { |c| c.is_offensive? || c.special_card? } if playable_cards.select { |c| c.is_offensive? }.length>0
     end
 
-
     playable_special_cards = playable_cards.wild
 
 
@@ -191,7 +188,7 @@ class Bot
 
 
     if playable_cards.length == 0
-      draw
+      return draw
     else
       if playable_normal_cards.length > 0
         debug "Playing normal card: #{playable_normal_cards[0]} [should only be here if >=#{ALGORITHM_CARD_NO_THRESHOLD} cards (#{@hand.size}]"
@@ -202,7 +199,7 @@ class Bot
         #Non-wild cards should be rejected at this point. The first card should be wild.
         #if playable_special_cards[0].figure == 'wild+4'
 
-        if game_state.above_war?
+        if game_state.clean?
           if turns_required >= 2
             return draw
           end
@@ -375,11 +372,6 @@ class Bot
     most_valuable_color_index = @color_value.index(most_valuable)
     debug "Most valuable color is #{Uno::COLORS[most_valuable_color_index]}"
     return Uno::COLORS[most_valuable_color_index]
-  end
-
-
-  def replace_hand(hand)
-    @hand = Hand.new(hand)
   end
 
 
@@ -557,7 +549,7 @@ class Bot
 
 #i should be able to get rid of most of this
   def special_card_penalty(cards, score)
-    debug "Special card penalty: #{cards.to_s} #{score.to_s}", 3
+    debug "Special card penalty: #{cards.map{|c|c.to_s}.join(' ')} #{score.to_s}", 3
     len = cards.length
     penalty_divisor = 1000000000
     adversary = tracker.default_adversary
