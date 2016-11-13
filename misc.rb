@@ -8,6 +8,16 @@ def debug(text, detail = 1)
   end
 end
 
+def set_debug(level)
+  $DEBUG = true
+  $DEBUG_LEVEL = level
+end
+
+def unset_debug
+  $DEBUG = false
+  $DEBUG_LEVEL = 0
+end
+
 class Array
   #array exists and has nth element (1=array start) not null
   def exists_and_has n

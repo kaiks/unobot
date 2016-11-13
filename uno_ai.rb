@@ -518,21 +518,20 @@ class Bot
       elsif prev_card.figure == :plus2
         #we will not be able to play it only if the next card is wd4 or reverse
         if c.figure == :plus2 || c.color == prev_card.color && c.figure == :reverse
-          prob_of_continuing = 1.0 - (tracker.change_from_wd4_probability c.color)
+          prob_of_continuing = 1.0 - (tracker.change_from_wd4_probability prev_card.color)
         elsif c.color == prev_card.color
-          prob_of_continuing = 1.0 - (tracker.change_from_plus2_probability c)
+          prob_of_continuing = 1.0 - (tracker.change_from_plus2_probability prev_card)
         else
           prob_of_continuing = 1.0 - (tracker.successive_probability c, prev_card)
         end
       elsif c.color == prev_card.color #same color, different figure
         if i == cards.length-1
-          debug "#{i} #{c.to_s} #{prev_card.to_s}", 2
-          prob_of_continuing = 1.0 - tracker.forced_color_change_probability(c)
+          prob_of_continuing = 1.0 - tracker.forced_color_change_probability(prev_card)
         else
-          prob_of_continuing = 1.0 - (tracker.color_change_probability c)
+          prob_of_continuing = 1.0 - (tracker.color_change_probability prev_card)
         end
       elsif c.figure == prev_card.figure
-        prob_of_continuing = 1.0 - (tracker.figure_change_probability c)
+        prob_of_continuing = 1.0 - (tracker.figure_change_probability prev_card)
       else
         #nothing in common, not much chance
         prob_of_continuing = tracker.successive_probability c, prev_card

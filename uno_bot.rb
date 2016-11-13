@@ -42,7 +42,7 @@ $bot = Cinch::Bot.new do
     end
     proxy.parse_main(m.user.nick, m.message)
     if m.message =~ /\.uno/
-      $bot.nick = BOT_NICK unless $bot.nick == BOT_NICK
+      $bot.nick = BotConfig::NICK unless $bot.nick == BotConfig::NICK
       last_creator = m.user.nick
     end
 

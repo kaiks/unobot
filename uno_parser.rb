@@ -1,11 +1,8 @@
 require_relative 'uno_card.rb'
 require_relative 'uno_ai.rb'
 require_relative 'uno_game_state.rb'
+require_relative 'uno_card_history.rb'
 
-CardAction = Struct.new(:player, :action, :attribute, :previous_card)
-PLAY_ACTION = 0
-PICK_ACTION = 1
-PASS_ACTION = 2
 
 class UnoProxy
   attr_accessor :bot, :active_player, :top_card
@@ -58,7 +55,6 @@ class UnoProxy
           @tracker.adversaries[text.split[1]].card_count = 2 unless text.include? $bot.nick
         when /.*Top card: .*/
           @lock = 1
-          @tracker.reset_cache
           @previous_player = @active_player
           @turn_counter += 1
 
@@ -71,18 +67,18 @@ class UnoProxy
           #always 1 card only, its by host
           card = parse_card_text(card_text)
 
-          (@double_play ? 2 : 1).times {
-            @history << CardAction.new(@active_player, PLAY_ACTION, card, @top_card)
-          }
+
 
           @tracker.update(text, @stack_size)
           update_game_state(text, card)
 
 
-          @top_card = card
-
 
           unless text.include?('passes')
+            (@double_play ? 2 : 1).times {
+              @history << CardAction.new(@previous_player, PLAY_ACTION, card, @top_card)
+            }
+            @top_card = card
             if @previous_player != $bot.nick
               @tracker.stack.remove! @top_card, @double_play
               #bot cards have been removed before!
@@ -92,9 +88,12 @@ class UnoProxy
 
           #reset double play state
           @double_play = false
+          @top_card = card
           if text.include? $bot.nick
             if !text.include? "#{$bot.nick} passes"
+              @tracker.reset_cache
               @tracker.calculate_color_probabilities
+              @tracker.look_through_play_history
               $last_turn_message = Time.now unless text.include? "#{$bot.nick} passes"
               debug 'Opening the lock.'
               $lock = false
@@ -196,21 +195,24 @@ class UnoProxy
     @previous_player = nil
     @active_player = nil
     @turn_counter = 0
-    @card_history = []
+    @history = []
+    @tracker.set_card_history @history
   end
 
   def update_game_state(text, card = nil)
-    action_nick = text.split[0]
     action_text = text.split[1]
 
     if action_text == 'draws' || action_text == 'passes.' || action_text == 'passes'
+      action_nick = text.split[0]
       action = PASS_ACTION
-      if action_text == 'draws' || @stack_size > 0
+      stack_size = @stack_size
+      if action_text == 'draws' || stack_size > 0
         action = PICK_ACTION
+        stack_size = [1,stack_size].max
       end
 
       @game_state.update_game_state (action_nick != $bot.nick)
-      @history << CardAction.new(action_nick, action, @stack_size, @top_card)
+      @history << CardAction.new(action_nick, action, stack_size, @top_card)
       @stack_size = 0
     elsif !card.nil?
       if card.is_offensive?

@@ -4,12 +4,17 @@ require_relative 'uno_player.rb'
 class Tracker
   attr_accessor :stack
   attr_reader :adversaries
+  attr_reader :prob_cache, :play_history
 
   def initialize
     @adversaries = {}
     @played_cards = []
     @stack = []
     @prob_cache = {}
+  end
+
+  def set_card_history(history_object)
+    @play_history = history_object
   end
 
   def reset
@@ -73,8 +78,6 @@ class Tracker
   # calculated when we need to know whether the color will be changed between two cards, e.g. r6 -> (?) -> r8
   # probability that the adversary _will_ change color
   def color_change_probability card
-    calculate_color_probabilities
-
     has_no_color = 1.0 - @prob_cache[card.color]
 
     has_no_color * forced_color_change_probability(card)
@@ -82,6 +85,7 @@ class Tracker
 
   def forced_color_change_probability card
     p = color_changing_cards card
+    debug "Card: #{card.to_s} P: #{p} prob: #{has_card_with_property p.to_f}"
     has_card_with_property p.to_f
   end
 
@@ -90,7 +94,7 @@ class Tracker
   # number of cards from the stack that can change color from a given normal card
   # e.g. argument: r6, changing cards: b6 g6 y6 w wd4
   def color_changing_cards(card)
-    @prob_cache[4000+card.code] = @stack.select{|c| (c.figure == card.figure && c.color != card.color) || c.special_card?}.length
+    @prob_cache[4000+card.code] ||= @stack.select{|c| (c.figure == card.figure && c.color != card.color) || c.special_card?}.length
   end
 
   # the probability that a random card from the stack is a card that will change color from a given normal card
@@ -143,11 +147,38 @@ class Tracker
     }
   end
 
+  def look_through_play_history
+    #todo: infer no reverses, +2s and wd4s
+    picked_cards = []
+    @play_history.reverse.
+        select{|a| a.action == PICK_ACTION && a.player != $bot.nick}[0..5].each {|action|
+          if action.attribute > 2
+            break
+          elsif action.attribute == 1
+            picked_cards |= [action.previous_card]
+          end
+    }
+
+    picked_cards.each { |card|
+      @prob_cache[card.color] = 0.0
+      #fix it for every card of the same figure
+      @prob_cache[5000 + card.code] = 0.0
+    }
+  end
+
   def default_adversary
     @adversaries[@adversaries.keys[0]]
   end
 
   private
+
+
+  def history_colors_picked
+    @play_history[-7..-1].
+        select{|a| a.action == PICK_ACTION && action.player != $bot.nick}.
+        map{|a| a.previous_card.color}.
+        uniq
+  end
 
   # given a stack of size N, adversary hand of size K, and P cards in stack having a certain property
   # calculates the probability that the adversary will have any card with such property in hand
@@ -161,5 +192,7 @@ class Tracker
     # 1 - (n-p)/n * (n-1-p)*(n-1) ...
     1.0 - (0..(k-1)).reduce(1) { |prod, i| prod*(1.0*n-p-i)/(1.0*n-i) }
   end
+
+
 
 end

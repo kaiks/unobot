@@ -22,10 +22,10 @@ class GameState
     @game_state = GAME_ON
   end
 
-  def update_game_state(picked = false)
+  def update_game_state(bot_picked = false)
       remove_state WAR
       remove_state WARWD
-      remove_state ONE_CARD if picked
+      remove_state ONE_CARD if bot_picked
   end
 
   def clean?

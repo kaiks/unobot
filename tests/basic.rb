@@ -168,6 +168,17 @@ class TestStrategy < Test::Unit::TestCase
            "Wrong path: #{path_s.to_s}")
   end
 
+  def test_zero_1
+    @bot.hand.from_text ['b6', 'b0']
+
+    @proxy.top_card = UnoCard.parse('wb')
+    prepare_tracker
+    path = @bot.calculate_best_path_by_probability_chain
+    path_s = path[2].map{|c| c.to_s}.to_s
+    assert_equal(path_s,['b0', 'b6'].to_s,
+                 "Wrong path: #{path_s}")
+  end
+
   def test_turn_order
     @bot.hand.from_text ['b9', 'bs', 'y8', 'y9', 'ys']
     @proxy.top_card = UnoCard.parse('b8')
