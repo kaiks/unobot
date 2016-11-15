@@ -341,7 +341,7 @@ class Bot
     @hand.push(c)
     if c.plays_after? last_card
       if c.special_card?
-        if has_one_card_or_late_game?
+        if has_one_card_or_late_game? && (!(tracker.color_change_probability(last_card.color) == 0) || hand.length<=2)
           c.set_wild_color get_wild_color_heuristic
           return play c
         end
