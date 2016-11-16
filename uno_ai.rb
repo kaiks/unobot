@@ -586,7 +586,7 @@ class Bot
       debug "TL:#{turns_left} PD#{penalty_divisor.to_f} Card #{i} #{c} removing #{penalty}. Score before: #{score[0]}", 3
       score[0] -= penalty
     }
-
+    return score[0] if score[1] >= 0.95
     return score[0] * Math::sqrt((turn_score_b(cards)+0.001))
   end
 
@@ -695,12 +695,13 @@ class Bot
   end
 
   def calculate_score scores
+
     n = scores[0]
     k = scores.length
     return 0.0 if n == k
     return 1.0 if k == 1
-
-    return (n-k)*1.0/n*1.0 + calculate_score(scores.drop(1))/10.0
+    calculation = calculate_score(scores.drop(1))/10.0
+    return (n-k)*1.0/n*1.0 + calculation
   end
 
   def tracker

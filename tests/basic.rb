@@ -168,6 +168,20 @@ class TestStrategy < Test::Unit::TestCase
            "Wrong path: #{path_s.to_s}")
   end
 
+  def test_wild_9
+    puts "Test wild 9"
+    @bot.hand.from_text ['wwd4', 'gs', 'g6']
+    @proxy.top_card = UnoCard.parse('wd4g')
+    prepare_tracker
+    set_debug 3
+    path = @bot.calculate_best_path_by_probability_chain
+    unset_debug
+    path_s = path[2].map{|c| c.to_s}
+    puts path_s
+    assert_not_equal(path_s[0],'wd4g',
+                     "Wrong path: #{path_s.to_s}")
+  end
+
   def test_zero_1
     @bot.hand.from_text ['b6', 'b0']
 
@@ -205,9 +219,7 @@ class TestStrategy < Test::Unit::TestCase
     prepare_tracker
     @proxy.tracker.default_adversary.card_count = 3
     @proxy.tracker.stack=@proxy.tracker.stack.shuffle.drop(50)
-    set_debug 3
     path = @bot.calculate_best_path_by_probability_chain
-    unset_debug
     path_s = path[2].map{|c| c.to_s}.to_s
     assert_equal(path_s,['g+2', 'g5', 'y5', 'y5', 'y7'].to_s,
                  "Wrong path: #{path_s}")
