@@ -338,7 +338,6 @@ class Bot
 
   def drawn_card_action c
     debug "[drawn_card_action] Card: #{c}"
-    @hand.push(c)
     if c.plays_after? last_card
       if c.special_card?
         if has_one_card_or_late_game? && (!(tracker.color_change_probability(last_card) == 0) || hand.length<=2)
