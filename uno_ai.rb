@@ -304,10 +304,13 @@ class Bot
       hand_colors_ordered = hand_color_counts.to_a.sort_by { |x| -x[1] }.map { |c| c[0] }
       #stack_colors_ordered = stack_color_counts.to_a.sort_by { |x| x[1] }.map { |c| c[0] }
       stack_colors_ordered = Uno::NORMAL_COLORS.
-          map{|x| [x,tracker.prob_cache[x]]}.
+          map{|x| [x, tracker.prob_cache[x]] }.
           sort_by{|x| x[1] }.
-          map{|x| x[0]}
-      colors_enemy_doesnt_have = Uno::NORMAL_COLORS.map{|x| [x,tracker.prob_cache[x]]}.select{|x| x[1] == 0.0}
+          map{|x| x[0] }
+      colors_enemy_doesnt_have = Uno::NORMAL_COLORS.
+          map{|x| [x,tracker.prob_cache[x]]}.
+          select{|x| x[1] == 0.0 }.
+          map{|x| x[0] }
 
       c = (colors_enemy_doesnt_have + hand_colors_ordered + stack_colors_ordered).uniq
       while c[0] == last_card.color || c[0] == :wild

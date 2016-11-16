@@ -103,7 +103,7 @@ class UnoCard
     if Uno::COLORS.member? @color
       return Uno::SHORT_COLORS[Uno::COLORS.find_index @color]
     else
-      throw 'not a valid color'
+      throw "not a valid color: #{@color}"
     end
   end
 
@@ -111,7 +111,7 @@ class UnoCard
     if Uno::COLORS.member? color
       return Uno::SHORT_COLORS[Uno::COLORS.find_index color]
     else
-      throw 'not a valid color'
+      throw "not a valid color: #{color}"
     end
   end
 
