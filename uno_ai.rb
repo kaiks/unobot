@@ -288,20 +288,28 @@ class Bot
     path.exists_and_has(3) && !path[2].empty? && path[1] > 0
   end
 
-#we only get here if the last card played was wild
+  #we only get here if the last card played was wild
+  #todo: look at the colors that he doesn't have
   def attempt_color_change(with_wd4 = true)
     wilds = @hand.select { |c| c.figure == :wild || with_wd4 && c.figure==:wild4 }
     if !wilds.empty?
       #order proposed colors first by what we have, second by what he DOESN'T have
       #the *1000 thing should be refactored
       hand_color_counts = @hand.group_by { |c| c.color }.each_with_object({}) { |(k, v), h| h[k] = v.length*1000 }
+      #the line below is incorrect: ai shouldn't interact with tracker stack
       stack_color_counts = tracker.stack.group_by { |c| c.color }.each_with_object({}) { |(k, v), h| h[k] = v.length }
 
       hand_color_counts.each { |k, v| v -= stack_color_counts[k] }
 
       hand_colors_ordered = hand_color_counts.to_a.sort_by { |x| -x[1] }.map { |c| c[0] }
-      stack_colors_ordered = stack_color_counts.to_a.sort_by { |x| x[1] }.map { |c| c[0] }
-      c = (hand_colors_ordered + stack_colors_ordered).uniq
+      #stack_colors_ordered = stack_color_counts.to_a.sort_by { |x| x[1] }.map { |c| c[0] }
+      stack_colors_ordered = Uno::NORMAL_COLORS.
+          map{|x| [x,tracker.prob_cache[x]]}.
+          sort_by{|x| x[1] }.
+          map{|x| x[0]}
+      colors_enemy_doesnt_have = Uno::NORMAL_COLORS.map{|x| [x,tracker.prob_cache[x]]}.select{|x| x[1] == 0.0}
+
+      c = (colors_enemy_doesnt_have + hand_colors_ordered + stack_colors_ordered).uniq
       while c[0] == last_card.color || c[0] == :wild
         c = c.drop(1)
       end
