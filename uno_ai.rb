@@ -526,7 +526,8 @@ class Bot
         elsif c.color == prev_card.color
           prob_of_continuing = 1.0 - (tracker.change_from_plus2_probability prev_card)
         else
-          prob_of_continuing = 1.0 - (tracker.successive_probability c, prev_card)
+          #temporary fix. y+2 -> g7 is really unlikely
+          prob_of_continuing = (tracker.successive_probability c, prev_card)/3.0
         end
       elsif c.color == prev_card.color #same color, different figure
         if i == cards.length-1
@@ -586,7 +587,7 @@ class Bot
       score[0] -= penalty
     }
 
-    return score[0] * (turn_score_b(cards)+0.01)
+    return score[0] * Math::sqrt((turn_score_b(cards)+0.001))
   end
 
 

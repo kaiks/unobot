@@ -199,5 +199,19 @@ class TestStrategy < Test::Unit::TestCase
     assert_equal(card_text, 'rs')
   end
 
+  def test_plustwo_1
+    @bot.hand.from_text ['g+2', 'g5', 'y5', 'y5', 'y7']
+    @proxy.top_card = UnoCard.parse('g5')
+    prepare_tracker
+    @proxy.tracker.default_adversary.card_count = 3
+    @proxy.tracker.stack=@proxy.tracker.stack.shuffle.drop(50)
+    set_debug 3
+    path = @bot.calculate_best_path_by_probability_chain
+    unset_debug
+    path_s = path[2].map{|c| c.to_s}.to_s
+    assert_equal(path_s,['g+2', 'g5', 'y5', 'y5', 'y7'].to_s,
+                 "Wrong path: #{path_s}")
+  end
+
 
 end

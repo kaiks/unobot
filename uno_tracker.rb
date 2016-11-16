@@ -70,6 +70,7 @@ class Tracker
   end
 
   # at this point we might as well give up optimizing
+  # card variable means previous card, i.e. the +2
   def change_from_plus2_probability card
     p = (@stack.select{|c| c.figure == :wild4 || c.figure == :plus2 || c.figure==:reverse && c.color==card.color}.length.to_f)
     @prob_cache[3000+card.code] ||= has_card_with_property p
