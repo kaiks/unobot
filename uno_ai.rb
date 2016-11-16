@@ -152,7 +152,12 @@ class Bot
     if game_state.one_card? && path_valid?(longest_path) && turn_score(longest_path[2]) < 2 && longest_path[2].size == @hand.size && !game_state.in_war?
       debug 'We are assuming that we can end the game right now.'
       playable_cards[0].set_wild_color best_chain_color if playable_cards[0].special_card?
-      return play playable_cards[0]
+      if playable_cards.length > 1 && playable_cards[0].code == playable_cards[1].code
+        return double_play playable_cards[0]
+      else
+        return play playable_cards[0]
+      end
+
     end
 
     #todo: if can play offensive, play offensive. Otherwise, play wild
