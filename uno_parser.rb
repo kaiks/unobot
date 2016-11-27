@@ -27,6 +27,10 @@ class UnoProxy
     @turn_counter = 0
   end
 
+  def last_card_player
+    @history.reverse.find{|action| action.action == PLAY_ACTION }.player
+  end
+
 
   def parse_main(nick, text)
     if host? nick
