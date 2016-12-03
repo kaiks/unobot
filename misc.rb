@@ -4,6 +4,7 @@ require 'logger'
 
 $logger = Logger.new('logs/unobot.log', 'daily', 10)
 $logger_queue = Queue.new
+$logger.datetime_format = "%H:%M:%S"
 
 $logger_thread = Thread.new {
   while $bot.config.engine.busy == false
