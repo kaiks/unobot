@@ -1,5 +1,6 @@
 #todo: separate logger from the rest
 #require 'extend_logger.rb'
+require 'logger'
 
 $logger = Logger.new('logs/unobot.log', 'daily', 10)
 $logger_queue = Queue.new
