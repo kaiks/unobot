@@ -16,7 +16,7 @@ def log(text)
    $logger_queue << ('\n' << text)
 end
 
-def debug(text, detail = 1)
+def bot_debug(text, detail = 1)
   log(text)
 
   if $DEBUG_LEVEL >= detail

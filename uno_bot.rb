@@ -96,7 +96,7 @@ $bot = Cinch::Bot.new do
       else
         sleep(BotConfig::LAG_DELAY)
         while $lock == true
-          debug 'Waiting for the message...', 2
+          bot_debug 'Waiting for the message...', 2
           sleep(1)
         end
         proxy.parse_hand(m.message)
@@ -104,7 +104,7 @@ $bot = Cinch::Bot.new do
         sleep(BotConfig::LAG_DELAY)
         proxy.get_message_queue.each { |i| @bot.Channel($bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
-        debug 'Setting the lock.'
+        bot_debug 'Setting the lock.'
         $lock = true
       end
     end

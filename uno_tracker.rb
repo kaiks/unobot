@@ -24,7 +24,7 @@ class Tracker
   end
 
   def new_adversary(nick)
-    debug 'New adversary -> ' + nick
+    bot_debug 'New adversary -> ' + nick
     @adversaries[nick] = UnoAdversary.new(nick)
     @adversaries[nick].card_count = 7
   end
@@ -33,15 +33,15 @@ class Tracker
     split = text.split
     nick = Misc::NICK_REGEX_PURE.match(split[0])[1]
     if @adversaries[nick].nil?
-      debug "Can't update card amount for #{split[0]}"
+      bot_debug "Can't update card amount for #{split[0]}"
       return
     end
 
     if text.include? 'draws'
-      debug "#{nick} draws a card." if $debug
+      bot_debug "#{nick} draws a card." if $debug
       @adversaries[nick].draw
     elsif text.include?('passes') && war_stack_size > 0
-      debug "#{nick} draws #{war_stack_size} cards." if $debug
+      bot_debug "#{nick} draws #{war_stack_size} cards." if $debug
       @adversaries[nick].draw war_stack_size
     end
   end
@@ -86,7 +86,7 @@ class Tracker
 
   def forced_color_change_probability card
     p = color_changing_cards card
-    debug "Card: #{card.to_s} P: #{p} prob: #{has_card_with_property p.to_f}"
+    bot_debug "Card: #{card.to_s} P: #{p} prob: #{has_card_with_property p.to_f}"
     has_card_with_property p.to_f
   end
 

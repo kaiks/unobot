@@ -53,5 +53,5 @@ Module.class.class_exec {
 }
 
 class Logger
-  async :debug
+  async :bot_debug
 end

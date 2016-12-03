@@ -34,14 +34,14 @@ class UnoProxy
 
   def parse_main(nick, text)
     if host? nick
-      debug "[parse_main] Bot says: #{text}"
+      bot_debug "[parse_main] Bot says: #{text}"
       case text
         when /must respond/
           @game_state.war!
           @stack_size = /\(total ([0-9]+)/.match(text)[1].to_i
-          debug "Set stack size to #{@stack_size}"
+          bot_debug "Set stack size to #{@stack_size}"
         when /Playing two cards/
-          debug 'Double play detected'
+          bot_debug 'Double play detected'
           @double_play = true
         when /Ok, created.*/
           #"Ok, created 04U09N12O08! game on #kx, say 'jo' to join in"
@@ -99,7 +99,7 @@ class UnoProxy
               @tracker.calculate_color_probabilities
               @tracker.look_through_play_history
               $last_turn_message = Time.now unless text.include? "#{$bot.nick} passes"
-              debug 'Opening the lock.'
+              bot_debug 'Opening the lock.'
               $lock = false
             end
           end
@@ -114,7 +114,7 @@ class UnoProxy
 
   def drawn_card c
     parsed = parse_hand(c, true)
-    debug "[drawn_card] Parsed card: #{parsed}"
+    bot_debug "[drawn_card] Parsed card: #{parsed}"
     if parsed.length == 1
       bot.drawn_card_action parsed[0]
     end
@@ -124,20 +124,20 @@ class UnoProxy
 
   def parse_hand(card_text, drawn = false)
     unless card_text.match('c')
-      debug '[parse_hand] Got hand, I guess.'
+      bot_debug '[parse_hand] Got hand, I guess.'
       card_text.strip!
 
       card_texts = card_text.split(3.chr)
       card_texts.delete_if { |ct| ct.to_s == nil.to_s }
-      debug "[parse_hand] card_texts: #{card_texts.join('//')}"
+      bot_debug "[parse_hand] card_texts: #{card_texts.join('//')}"
       cards = card_texts.map { |ct| parse_card_text(ct) }
-      debug "[parse_hand] parsed: #{cards.to_s}", 2
+      bot_debug "[parse_hand] parsed: #{cards.to_s}", 2
       if cards.length == 1 && drawn == true
         @bot.hand << cards[0]
       else
         @bot.hand = Hand.new(cards)
       end
-      debug "[parse_hand] parsed hand: #{@bot.hand.to_s}"
+      bot_debug "[parse_hand] parsed hand: #{@bot.hand.to_s}"
       if @game_start_draw
         @game_start_draw = false
         @tracker.stack.remove! cards
@@ -179,11 +179,11 @@ class UnoProxy
 
   # in: text, out: UnoCard
   def parse_card_text(card_text)
-    debug "[parse_card_text] #{card_text}"
+    bot_debug "[parse_card_text] #{card_text}"
     figure = card_text.match(/\[(.*)\]/)[1]
     color = card_text.match(/\d+/)[0]
     color = color.to_i
-    debug "[parse_card_text] Parsed figure: #{figure} color: #{color}"
+    bot_debug "[parse_card_text] Parsed figure: #{figure} color: #{color}"
     UnoCard.parse(extract_color(color).to_s+figure.to_s)
   end
 

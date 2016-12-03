@@ -62,9 +62,9 @@ class Bot
 
 
   def draw
-    debug 'Draw function', 2
+    bot_debug 'Draw function', 2
     if game_state.war?
-      debug '(We are in the war state)', 2
+      bot_debug '(We are in the war state)', 2
       @proxy.add_message('pa')
     else
       @proxy.add_message('pe')
@@ -88,7 +88,7 @@ class Bot
 
 #todo: change color normally when last few cards include w by adversary
   def play_by_value
-    debug "Top card: #{last_card}", 2
+    bot_debug "Top card: #{last_card}", 2
     while @proxy.lock == 1
       sleep(0.5)
     end
@@ -119,7 +119,7 @@ class Bot
         return play playable_cards[0]
       else
         @predefined_path = get_offensive_path
-        debug 'Considering predefined path: ' + @predefined_path.to_s
+        bot_debug 'Considering predefined path: ' + @predefined_path.to_s
         if @predefined_path.length > 0
           return play_predefined_path
         end
@@ -127,12 +127,12 @@ class Bot
     end
 
 
-    debug "Game state: #{game_state}"
+    bot_debug "Game state: #{game_state}"
     if @hand.size < ALGORITHM_CARD_NO_THRESHOLD
       longest_path = calculate_best_path_by_probability_chain unless game_state.in_war?
 
       if game_state.clean? && path_valid?(longest_path)
-        debug "[play_by_value] Normal best path: #{longest_path}"
+        bot_debug "[play_by_value] Normal best path: #{longest_path}"
         next_card = longest_path[2][0]
         unless longest_path[2][1].nil?
           #two cards,same color, same figure
@@ -149,14 +149,14 @@ class Bot
     end
 
     playable_cards = @hand.playable_after last_card
-    debug "Top card: #{last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state.game_state}"
+    bot_debug "Top card: #{last_card}. Playable cards are: #{playable_cards} GAME STATE IS #{game_state.game_state}"
 
     playable_cards.sort_by! { |x| -(x.value%10) }
 
 
     #both players have one card
     if game_state.one_card? && path_valid?(longest_path) && turn_score(longest_path[2]) < 2 && longest_path[2].size == @hand.size && !game_state.in_war?
-      debug 'We are assuming that we can end the game right now.'
+      bot_debug 'We are assuming that we can end the game right now.'
       playable_cards[0].set_wild_color best_chain_color if playable_cards[0].special_card?
       if playable_cards.length > 1 && playable_cards[0].code == playable_cards[1].code
         return double_play playable_cards[0]
@@ -191,18 +191,18 @@ class Bot
 
 
     playable_special_cards.sort_by! { |c| c.figure }
-    debug "Playable special cards: #{playable_special_cards}"
-    debug "Playable cards: #{playable_cards}"
+    bot_debug "Playable special cards: #{playable_special_cards}"
+    bot_debug "Playable cards: #{playable_cards}"
 
     playable_normal_cards = playable_cards - playable_special_cards
-    debug "Playable normal cards: #{playable_normal_cards}"
+    bot_debug "Playable normal cards: #{playable_normal_cards}"
 
 
     if playable_cards.length == 0
       return draw
     else
       if playable_normal_cards.length > 0
-        debug "Playing normal card: #{playable_normal_cards[0]} [should only be here if >=#{ALGORITHM_CARD_NO_THRESHOLD} cards (#{@hand.size}]"
+        bot_debug "Playing normal card: #{playable_normal_cards[0]} [should only be here if >=#{ALGORITHM_CARD_NO_THRESHOLD} cards (#{@hand.size}]"
         raise "Tried playing normal card with naive algorithm, while having #{@hand.size} cards. \
           Should have #{ALGORITHM_CARD_NO_THRESHOLD}" if @hand.size < ALGORITHM_CARD_NO_THRESHOLD && game_state.clean?
         play playable_normal_cards[0]
@@ -216,10 +216,10 @@ class Bot
           end
         end
         if @hand.length >= ALGORITHM_CARD_NO_THRESHOLD
-          debug 'h>7'
+          bot_debug 'h>7'
           playable_special_cards[0].set_wild_color get_wild_color_heuristic
         else
-          debug 'h<=7'
+          bot_debug 'h<=7'
           playable_special_cards[0].set_wild_color best_chain_color
         end
         play playable_special_cards[0]
@@ -259,7 +259,7 @@ class Bot
   end
 
   def play_predefined_path
-    debug "#{@predefined_path}", 2
+    bot_debug "#{@predefined_path}", 2
     raise 'Predefined path is empty' if @predefined_path.length == 0
     raise 'Predefined path is wrong: can\'t play' unless @predefined_path[0].plays_after? last_card
     if @predefined_path.length >= 2
@@ -324,13 +324,13 @@ class Bot
       end
       wilds[0].set_wild_color c[0]
       @predefined_path = [wilds[0]]
-      debug 'Considering predefined path: ' + @predefined_path.to_s
+      bot_debug 'Considering predefined path: ' + @predefined_path.to_s
       return true
     else
       skips = @hand.of_figure(:skip)
       if skips.length > 1 && !skips.of_color(last_card.color).empty? && !skips.select { |c| c.color != last_card.color }.empty?
         @predefined_path = [skips.of_color(last_card.color)[0], skips.find { |c| c.color != last_card.color }]
-        debug 'Considering predefined path: ' + @predefined_path.to_s
+        bot_debug 'Considering predefined path: ' + @predefined_path.to_s
         return true
       end
 
@@ -339,7 +339,7 @@ class Bot
       continuation = reverses.select { |c| c.color != last_card.color }
       if continuation.length > 0 && start.length > 1
         @predefined_path = [start[0], start[1], continuation[0]]
-        debug 'Considering predefined path: ' + @predefined_path.to_s
+        bot_debug 'Considering predefined path: ' + @predefined_path.to_s
         return true
       end
     end
@@ -347,19 +347,19 @@ class Bot
   end
 
   def best_chain_color p = nil
-    debug 'Getting best chain color'
+    bot_debug 'Getting best chain color'
     p ||= get_longest_path(UnoCard.new(:wild, :wild))
     if p.exists_and_has 1
-      debug "Apparently it's #{p[0].color}"
+      bot_debug "Apparently it's #{p[0].color}"
       return p[0].color if p[0].color != :wild
     end
 
-    debug 'Failed to find a color.'
+    bot_debug 'Failed to find a color.'
     return most_valuable_color
   end
 
   def drawn_card_action c
-    debug "[drawn_card_action] Card: #{c}"
+    bot_debug "[drawn_card_action] Card: #{c}"
     if c.plays_after? last_card
       if c.special_card?
         if has_one_card_or_late_game? && (!(tracker.color_change_probability(last_card) == 0) || hand.length<=2)
@@ -393,7 +393,7 @@ class Bot
     calculate_color_values
     most_valuable = @color_value.max
     most_valuable_color_index = @color_value.index(most_valuable)
-    debug "Most valuable color is #{Uno::COLORS[most_valuable_color_index]}"
+    bot_debug "Most valuable color is #{Uno::COLORS[most_valuable_color_index]}"
     return Uno::COLORS[most_valuable_color_index]
   end
 
@@ -445,7 +445,7 @@ class Bot
 
 #[best_sequence[0], maxchildren, best_sequence]
   def get_longest_path(card, accu = 0, past_cards = [])
-    debug "lvl#{accu}: Trying to find the longest path for #{card} with #{accu}. Visited? #{card.visited}", 2
+    bot_debug "lvl#{accu}: Trying to find the longest path for #{card} with #{accu}. Visited? #{card.visited}", 2
     return if card.visited == 1
     card.visited = 1
 
@@ -462,17 +462,17 @@ class Bot
       path_result = get_longest_path(i, accu + 1, this_past_cards_copy)
       this_path = [i] + path_result[2]
       this_child_max = path_result[1] + 1
-      debug "lvl#{accu}: This path's max #{this_child_max}", 3
+      bot_debug "lvl#{accu}: This path's max #{this_child_max}", 3
       if maxchildren < this_child_max
 
         maxchildren = this_child_max
         best_sequence = this_path
-        debug "lvl#{accu}: Got new best path boys! Its #{sequence_readable(best_sequence)}", 3
+        bot_debug "lvl#{accu}: Got new best path boys! Its #{sequence_readable(best_sequence)}", 3
         best_turn_score = turn_score best_sequence
 
       elsif maxchildren == this_child_max
         this_turn_score = turn_score(this_path)
-        debug "lvl#{accu}: two paths were similar #{maxchildren}.
+        bot_debug "lvl#{accu}: two paths were similar #{maxchildren}.
               Other info: this:#{sequence_readable(this_path)}
                           best:#{sequence_readable(best_sequence)}
               Now trying to establish better scores:
@@ -482,7 +482,7 @@ class Bot
           best_sequence = this_path
           best_turn_score = this_turn_score
         elsif best_turn_score == this_turn_score
-          debug "lvl#{accu}: two paths were similar again
+          bot_debug "lvl#{accu}: two paths were similar again
                 Now trying to establish better: this #{collateral_score path_result[2]} best #{collateral_score best_sequence}", 3
 
           if (collateral_score best_sequence) > (collateral_score path_result[2])
@@ -494,7 +494,7 @@ class Bot
       end
     }
     card.visited = 0
-    debug "lvl#{accu}: returning #{[best_sequence[0], maxchildren, best_sequence]}", 2
+    bot_debug "lvl#{accu}: returning #{[best_sequence[0], maxchildren, best_sequence]}", 2
     if !best_sequence[0].nil? && best_sequence[0].special_card?
       assign_sequence_wild_color best_sequence
     end
@@ -560,19 +560,19 @@ class Bot
         #nothing in common, not much chance
         prob_of_continuing = tracker.successive_probability c, prev_card
       end
-      debug "#{prob_of_continuing} #{prev_card.to_s} -> #{c.to_s}", 2
+      bot_debug "#{prob_of_continuing} #{prev_card.to_s} -> #{c.to_s}", 2
       total_score += 0.1*prev_iter*prob_of_continuing+prob_of_continuing
       prev_iter = prev_iter*prob_of_continuing
     }
-    debug "For card set #{cards.map{|c|c.to_s}.to_s}"
-    debug "total_score: Returning #{total_score} #{prev_iter}", 2
+    bot_debug "For card set #{cards.map{|c|c.to_s}.to_s}"
+    bot_debug "total_score: Returning #{total_score} #{prev_iter}", 2
     return [total_score, prev_iter]
   end
 
 
 #i should be able to get rid of most of this
   def special_card_penalty(cards, score)
-    debug "Special card penalty: #{cards.map{|c|c.to_s}.join(' ')} #{score.to_s}", 3
+    bot_debug "Special card penalty: #{cards.map{|c|c.to_s}.join(' ')} #{score.to_s}", 3
     len = cards.length
     penalty_divisor = 1000000000
     adversary = tracker.default_adversary
@@ -601,8 +601,8 @@ class Bot
       #turns_left += 1
 
       penalty = (turns_left) / penalty_divisor.to_f
-      #debug "#{cards_left.map { |c| c.to_s }.join(' ')}", 3
-      debug "TL:#{turns_left} PD#{penalty_divisor.to_f} Card #{i} #{c} removing #{penalty}. Score before: #{score[0]}", 3
+      #bot_debug "#{cards_left.map { |c| c.to_s }.join(' ')}", 3
+      bot_debug "TL:#{turns_left} PD#{penalty_divisor.to_f} Card #{i} #{c} removing #{penalty}. Score before: #{score[0]}", 3
       score[0] -= penalty
     }
     return score[0] if score[1] >= 0.95
@@ -734,16 +734,16 @@ class Bot
       @hand.permutation(@hand.length) { |p|
         next unless p[0].plays_after? last_card
         probability_output = smart_probability(p)
-        debug "Before: #{probability_output}", 3
+        bot_debug "Before: #{probability_output}", 3
         probability_score = special_card_penalty(p, probability_output)
-        debug "After: #{probability_score}", 3
+        bot_debug "After: #{probability_score}", 3
 
         if probability_score > best_score
           best_score = probability_score
           best_permutation = p
         end
       }
-      debug "Found best permutation: #{best_permutation.map { |c| c.to_s }.to_s}"
+      bot_debug "Found best permutation: #{best_permutation.map { |c| c.to_s }.to_s}"
       if best_permutation.length > 0 && best_permutation[0].special_card?
         best_permutation[0].set_wild_color first_non_wild_color(best_permutation)
       end

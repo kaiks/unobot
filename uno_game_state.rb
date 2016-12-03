@@ -18,7 +18,7 @@ class GameState
 
 
   def reset
-    debug 'Resetting game state'
+    bot_debug 'Resetting game state'
     @game_state = GAME_ON
   end
 
@@ -77,17 +77,17 @@ class GameState
 
   private
   def add_state f
-    debug "Adding game state flag #{f}"
+    bot_debug "Adding game state flag #{f}"
     @game_state |= f
   end
 
   def has_state? state
-    debug "[#{caller[1]} -> #has_state?] Checking game state: #{state} (is: #{game_state})"
+    bot_debug "[#{caller[1]} -> #has_state?] Checking game state: #{state} (is: #{game_state})"
     (game_state & state) == state
   end
 
   def remove_state f
-    debug "Removing game state flag #{f}"
+    bot_debug "Removing game state flag #{f}"
     @game_state &= ~f
   end
 end
