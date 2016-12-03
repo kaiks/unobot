@@ -15,6 +15,7 @@ ALGORITHM_CARD_NO_THRESHOLD = 8
 class Bot
   attr_accessor :proxy, :hand
   attr_accessor :predefined_path
+  attr_reader :busy
 
   def initialize(proxy, autostart = 1)
     @proxy = proxy
@@ -22,6 +23,7 @@ class Bot
     @predefined_path = []
     @turns_required_cache = {}
     @turn = nil
+    @busy = false
     if autostart == 1
       @hand.add_random(8)
 
@@ -48,12 +50,14 @@ class Bot
   def play(card)
     @proxy.add_message("pl #{card}")
     @hand.destroy(card)
+    @busy = false
   end
 
   def double_play(card)
     @proxy.add_message("pl #{card}#{card}")
     @hand.destroy(card)
     @hand.destroy(card)
+    @busy = false
   end
 
 
@@ -65,6 +69,7 @@ class Bot
     else
       @proxy.add_message('pe')
     end
+    @busy = false
   end
 
 
@@ -88,6 +93,7 @@ class Bot
       sleep(0.5)
     end
 
+    @busy = true
     if @predefined_path.length>0
       return play_predefined_path
     end
@@ -364,12 +370,14 @@ class Bot
         path = calculate_best_path_by_probability_chain unless @hand.size > 7
         if !path_valid?(path) || path[0].figure != c.figure
           @proxy.add_message('pa')
+          @busy = false
           return
         end
         c = path[0]
       end
       play c
     else
+      @busy = false
       @proxy.add_message('pa')
     end
   end

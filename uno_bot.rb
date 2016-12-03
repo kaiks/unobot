@@ -29,6 +29,7 @@ $bot = Cinch::Bot.new do
     c.host_nicks          = BotConfig::HOST_NICKS
     c.admin_nicks         = BotConfig::ADMIN_NICKS
     c.messages_per_second = BotConfig::MESSAGES_PER_SECOND
+    c.engine              = bot
 
     if c.server == 'localhost'
       c.messages_per_second = 100000
@@ -112,4 +113,4 @@ $bot = Cinch::Bot.new do
 
 end
 
-$bot.start
+$bot.start unless last_creator != ''

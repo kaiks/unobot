@@ -1,13 +1,23 @@
-require 'extend_logger.rb'
+#todo: separate logger from the rest
+#require 'extend_logger.rb'
 
 $logger = Logger.new('logs/unobot.log', 'daily', 10)
+$logger_queue = Queue.new
 
-def log(text, severity = Logger::INFO)
-  $logger.add(severity, text)
+$logger_thread = Thread.new {
+  while $bot.config.engine.busy == false
+    $logger.add(Logger::INFO, $logger_queue.pop)
+  end
+  sleep(0.5)
+}
+
+def log(text)
+   $logger_queue << ('\n' << text)
 end
 
 def debug(text, detail = 1)
   log(text)
+
   if $DEBUG_LEVEL >= detail
     puts "#{detail >= 3 ? '' : caller[0]} #{text}"
   end
