@@ -4,6 +4,7 @@ require 'thread'
 require 'singleton'
 require 'delegate'
 require 'monitor'
+require 'logger'
 
 class Async
   include Singleton
@@ -51,7 +52,6 @@ Module.class.class_exec {
   end
 }
 
-require 'Logger'
 class Logger
   async :debug
 end
