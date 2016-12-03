@@ -1,8 +1,18 @@
+require 'extend_logger.rb'
+
+$logger = Logger.new('logs/unobot.log', 'daily')
+
+def log(text, severity = Logger::INFO)
+  $logger.add(severity, text)
+end
+
 def debug text
   puts text if $DEBUG
+  log(text)
 end
 
 def debug(text, detail = 1)
+  log(text)
   if $DEBUG_LEVEL >= detail
     puts "#{detail >= 3 ? '' : caller[0]} #{text}"
   end

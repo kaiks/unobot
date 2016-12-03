@@ -95,7 +95,7 @@ $bot = Cinch::Bot.new do
       else
         sleep(BotConfig::LAG_DELAY)
         while $lock == true
-          debug 'Waiting for the message...'
+          debug 'Waiting for the message...', 2
           sleep(1)
         end
         proxy.parse_hand(m.message)
