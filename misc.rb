@@ -1,6 +1,6 @@
 require 'extend_logger.rb'
 
-$logger = Logger.new('logs/unobot.log', 'daily')
+$logger = Logger.new('logs/unobot.log', 'daily', 10)
 
 def log(text, severity = Logger::INFO)
   $logger.add(severity, text)
