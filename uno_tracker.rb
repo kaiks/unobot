@@ -38,10 +38,10 @@ class Tracker
     end
 
     if text.include? 'draws'
-      bot_debug "#{nick} draws a card." if $debug
+      bot_debug "#{nick} draws a card."
       @adversaries[nick].draw
     elsif text.include?('passes') && war_stack_size > 0
-      bot_debug "#{nick} draws #{war_stack_size} cards." if $debug
+      bot_debug "#{nick} draws #{war_stack_size} cards."
       @adversaries[nick].draw war_stack_size
     end
   end
@@ -86,7 +86,7 @@ class Tracker
 
   def forced_color_change_probability card
     p = color_changing_cards card
-    bot_debug "Card: #{card.to_s} P: #{p} prob: #{has_card_with_property p.to_f}"
+    bot_debug "Card: #{card.to_s} P: #{p} prob: #{has_card_with_property p.to_f}", 2
     has_card_with_property p.to_f
   end
 
