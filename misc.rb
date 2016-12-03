@@ -6,11 +6,6 @@ def log(text, severity = Logger::INFO)
   $logger.add(severity, text)
 end
 
-def debug text
-  puts text if $DEBUG
-  log(text)
-end
-
 def debug(text, detail = 1)
   log(text)
   if $DEBUG_LEVEL >= detail
