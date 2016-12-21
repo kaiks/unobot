@@ -84,6 +84,18 @@ $bot = Cinch::Bot.new do
       load 'uno_ai.rb'
       m.reply 'ca'
     end
+
+    if m.message =~ /^.reset$/
+      @lock = false
+      m.reply 'ca'
+      sleep(2)
+      m.reply 'cd'
+    end
+
+    if m.message =~ /^.fix/
+      proxy.tracker.new_adversary m.user.nick
+      m.reply "Fixed for #{m.user.nick}"
+    end
   end
 
   on :notice do |m|
@@ -95,10 +107,17 @@ $bot = Cinch::Bot.new do
         $last_acted_on_turn_message = $last_turn_message
       else
         sleep(BotConfig::LAG_DELAY)
-        while $lock == true
+        attempts = 0
+        while $lock == true && attempts < 10
           bot_debug 'Waiting for the message...', 2
           sleep(1)
+          attempts += 1
         end
+
+        if attempts >= 10
+          m.reply '.note kx omg error. (try to type \'.fix\' and then \'.reset\')'
+        end
+
         proxy.parse_hand(m.message)
         bot.play_by_value
         sleep(BotConfig::LAG_DELAY)
