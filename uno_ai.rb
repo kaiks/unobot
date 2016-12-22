@@ -12,7 +12,7 @@ GAME_ON = 0
 
 ALGORITHM_CARD_NO_THRESHOLD = 8
 
-class Bot
+class UnoAI
   attr_accessor :proxy, :hand
   attr_accessor :predefined_path
   attr_reader :busy

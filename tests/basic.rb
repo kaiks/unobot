@@ -7,7 +7,7 @@ require '../bot_config'
 class TestStrategy < Test::Unit::TestCase
   def setup
     @proxy = UnoProxy.new(nil)
-    @bot = Bot.new(@proxy, 0)
+    @bot = UnoAI.new(@proxy, 0)
     @proxy.bot = @bot
 
     @bot.hand = Hand.new
