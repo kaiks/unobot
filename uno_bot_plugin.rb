@@ -5,17 +5,16 @@ class UnobotPlugin
 
 
   match /uno$/,         method: :on_game_start_request
-  match /unobot$/,         method: :on_unobot, use_prefix: false
-  match /pe$/,         method: :on_game_start, use_prefix: false
-  match /pa$/,         method: :on_turn_pass, use_prefix: false
-  match /ha$/,         method: :on_hand_request, use_prefix: false
-  match /set debug (-?[0-9]+)/, method: :set_debug, use_prefix: false
-  match /Ok - created/, method: :on_game_start_non_ladder, use_prefix: false
-  match /Ok, created/, method: :on_game_start, use_prefix: false
+  match /^unobot$/,         method: :on_unobot, use_prefix: false
+  match /^pa$/,         method: :on_turn_pass, use_prefix: false
+  match /^ha$/,         method: :on_hand_request, use_prefix: false
+  match /^set debug (-?[0-9]+)/, method: :set_debug, use_prefix: false
+  match /^Ok - created/, method: :on_game_start_non_ladder, use_prefix: false
+  match /^Ok, created/, method: :on_game_start, use_prefix: false
   match /reload/,  method: :on_reload
   match /reset/,  method: :on_reset
   match /fix/,  method: :on_fix
-  match /(.+)/, method: :on_any_message, use_prefix: false
+  match /^(.+)/, method: :on_any_message, use_prefix: false
 
   match /eval (.*)/, method: :on_eval, use_prefix: false
 
@@ -42,7 +41,8 @@ class UnobotPlugin
   end
 
   def set_debug(m, level)
-    $DEBUG_LEVEL = level
+    $DEBUG_LEVEL = level.to_i
+    $DEBUG = true if $DEBUG_LEVEL >= 0
     m.reply 'Ok.'
   end
 
@@ -65,7 +65,7 @@ class UnobotPlugin
   end
 
   def on_hand_request m
-    m.reply @bot.hand.to_s
+    m.reply @proxy.ai_engine.hand.to_s
   end
 
   def on_game_start_non_ladder m
@@ -123,7 +123,8 @@ class UnobotPlugin
         end
 
         if attempts >= 10
-          m.reply '.note kx omg error. (try to type \'.fix\' and then \'.reset\')'
+          @bot.Channel(@bot.config.channels[0]).send '.note kx omg error. (try to type \'.fix\' and then \'.reset\')'
+          $lock = false
         end
 
         @proxy.parse_hand(m.message)

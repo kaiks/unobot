@@ -116,7 +116,7 @@ class UnoProxy
     parsed = parse_hand(c, true)
     bot_debug "[drawn_card] Parsed card: #{parsed}"
     if parsed.length == 1
-      bot.drawn_card_action parsed[0]
+      @ai_engine.drawn_card_action parsed[0]
     end
     @tracker.stack.remove! parsed
   end
@@ -204,6 +204,7 @@ class UnoProxy
   end
 
   def update_game_state(text, card = nil)
+
     action_text = text.split[1]
 
     if action_text == 'draws' || action_text == 'passes.' || action_text == 'passes'
