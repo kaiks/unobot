@@ -103,7 +103,7 @@ class UnobotPlugin
 
   def on_eval m, arg
     ensure_admin_nick m.user.nick
-    m.reply "#{eval arg}"
+    m.reply "#{eval(arg)}"
   end
 
   def on_notice(m)
