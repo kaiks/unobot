@@ -33,8 +33,8 @@ class UnobotPlugin
     super
 
     @proxy = UnoProxy.new(nil)
-    @proxy.bot = UnoAI.new(@proxy, 0)
-    @bot.config.engine = @proxy.bot
+    @proxy.ai_engine = UnoAI.new(@proxy, 0)
+    @bot.config.engine = @proxy.ai_engine
   end
 
   def message(m)
@@ -107,7 +107,7 @@ class UnobotPlugin
   end
 
   def on_notice(m)
-    if @bot.config.host_nicks.include? m.user.nick
+    if m.user && @bot.config.host_nicks.include?(m.user.nick)
       if m.message.include? 'draw'
         t = m.message.split(':')
         @proxy.drawn_card(t[1])
@@ -127,7 +127,7 @@ class UnobotPlugin
         end
 
         @proxy.parse_hand(m.message)
-        @proxy.bot.play_by_value
+        @proxy.ai_engine.play_by_value
         sleep(BotConfig::LAG_DELAY)
         @proxy.get_message_queue.each { |i| @bot.Channel(@bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
