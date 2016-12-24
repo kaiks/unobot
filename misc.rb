@@ -27,7 +27,7 @@ end
 
 def set_debug(level)
   $DEBUG = true
-  $DEBUG_LEVEL = level
+  $DEBUG_LEVEL = level.to_i
 end
 
 def unset_debug
