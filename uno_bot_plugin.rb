@@ -25,7 +25,7 @@ class UnobotPlugin
     return unless @bot.config.host_nicks.include? nick
   end
 
-  def ensure_admin_nick m
+  def ensure_admin_nick nick
     return unless @bot.config.host_nicks.include? nick
   end
 
