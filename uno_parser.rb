@@ -5,13 +5,13 @@ require_relative 'uno_card_history.rb'
 
 
 class UnoProxy
-  attr_accessor :bot, :active_player, :top_card
+  attr_accessor :ai_engine, :active_player, :top_card
   attr_reader :tracker
   attr_reader :game_state, :lock, :history#, :top_card
   attr_reader :turn_counter, :previous_player
 
   def initialize(bot = nil)
-    @bot = bot
+    @ai_engine = bot
     @game_state = GameState.new
     @previous_player = nil
     @active_player = nil
@@ -117,7 +117,7 @@ class UnoProxy
     parsed = parse_hand(c, true)
     bot_debug "[drawn_card] Parsed card: #{parsed}"
     if parsed.length == 1
-      bot.drawn_card_action parsed[0]
+      @ai_engine.drawn_card_action parsed[0]
     end
     @tracker.stack.remove! parsed
   end
@@ -134,11 +134,11 @@ class UnoProxy
       cards = card_texts.map { |ct| parse_card_text(ct) }
       bot_debug "[parse_hand] parsed: #{cards.to_s}", 2
       if cards.length == 1 && drawn == true
-        @bot.hand << cards[0]
+        @ai_engine.hand << cards[0]
       else
-        @bot.hand = Hand.new(cards)
+        @ai_engine.hand = Hand.new(cards)
       end
-      bot_debug "[parse_hand] parsed hand: #{@bot.hand.to_s}"
+      bot_debug "[parse_hand] parsed hand: #{@ai_engine.hand.to_s}"
       if @game_start_draw
         @game_start_draw = false
         @tracker.stack.remove! cards
@@ -205,6 +205,7 @@ class UnoProxy
   end
 
   def update_game_state(text, card = nil)
+
     action_text = text.split[1]
 
     if action_text == 'draws' || action_text == 'passes.' || action_text == 'passes'

@@ -3,7 +3,6 @@
 
 require 'cinch'
 require 'thread'
-require './misc.rb'
 require './bot_config.rb'
 require_relative 'uno_parser.rb'
 require_relative 'pts_ratio_checker.rb'

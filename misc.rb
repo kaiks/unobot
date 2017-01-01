@@ -7,10 +7,12 @@ $logger_queue = Queue.new
 $logger.datetime_format = "%H:%M:%S"
 
 $logger_thread = Thread.new {
-  while $bot.config.engine.busy == false
-    $logger.add(Logger::INFO, $logger_queue.pop)
+  while true
+    while $DEBUG == true && $bot && $bot.config.engine.busy == false
+      $logger.add(Logger::INFO, $logger_queue.pop)
+    end
+    sleep(0.5)
   end
-  sleep(0.5)
 }
 
 def log(text)
@@ -27,7 +29,7 @@ end
 
 def set_debug(level)
   $DEBUG = true
-  $DEBUG_LEVEL = level
+  $DEBUG_LEVEL = level.to_i
 end
 
 def unset_debug

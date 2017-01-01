@@ -9,7 +9,7 @@ class TestStrategy < Test::Unit::TestCase
   def setup
     @proxy = UnoProxy.new(nil)
     @bot = UnoAI.new(@proxy, 0)
-    @proxy.bot = @bot
+    @proxy.ai_engine = @bot
 
     @bot.hand = Hand.new
     @proxy.top_card = UnoCard.parse('g0')

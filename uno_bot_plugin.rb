@@ -5,17 +5,16 @@ class UnobotPlugin
 
 
   match /uno$/,         method: :on_game_start_request
-  match /unobot$/,         method: :on_unobot, use_prefix: false
-  match /pe$/,         method: :on_game_start, use_prefix: false
-  match /pa$/,         method: :on_turn_pass, use_prefix: false
-  match /ha$/,         method: :on_hand_request, use_prefix: false
-  match /set debug (-?[0-9]+)/, method: :set_debug, use_prefix: false
-  match /Ok - created/, method: :on_game_start_non_ladder, use_prefix: false
-  match /Ok, created/, method: :on_game_start, use_prefix: false
+  match /^unobot$/,         method: :on_unobot, use_prefix: false
+  match /^pa$/,         method: :on_turn_pass, use_prefix: false
+  match /^ha$/,         method: :on_hand_request, use_prefix: false
+  match /^set debug (-?[0-9]+)/, method: :set_debug, use_prefix: false
+  match /^Ok - created/, method: :on_game_start_non_ladder, use_prefix: false
+  match /^Ok, created/, method: :on_game_start, use_prefix: false
   match /reload/,  method: :on_reload
   match /reset/,  method: :on_reset
   match /fix/,  method: :on_fix
-  match /(.+)/, method: :on_any_message, use_prefix: false
+  match /^(.+)/, method: :on_any_message, use_prefix: false
 
   match /eval (.*)/, method: :on_eval, use_prefix: false
 
@@ -25,7 +24,7 @@ class UnobotPlugin
     return unless @bot.config.host_nicks.include? nick
   end
 
-  def ensure_admin_nick m
+  def ensure_admin_nick nick
     return unless @bot.config.host_nicks.include? nick
   end
 
@@ -33,8 +32,8 @@ class UnobotPlugin
     super
 
     @proxy = UnoProxy.new(nil)
-    @proxy.bot = UnoAI.new(@proxy, 0)
-    @bot.config.engine = @proxy.bot
+    @proxy.ai_engine = UnoAI.new(@proxy, 0)
+    @bot.config.engine = @proxy.ai_engine
   end
 
   def message(m)
@@ -42,7 +41,8 @@ class UnobotPlugin
   end
 
   def set_debug(m, level)
-    $DEBUG_LEVEL = level
+    $DEBUG_LEVEL = level.to_i
+    $DEBUG = true if $DEBUG_LEVEL >= 0
     m.reply 'Ok.'
   end
 
@@ -65,7 +65,7 @@ class UnobotPlugin
   end
 
   def on_hand_request m
-    m.reply @bot.hand.to_s
+    m.reply @proxy.ai_engine.hand.to_s
   end
 
   def on_game_start_non_ladder m
@@ -103,11 +103,11 @@ class UnobotPlugin
 
   def on_eval m, arg
     ensure_admin_nick m.user.nick
-    m.reply "#{eval arg}"
+    m.reply "#{eval(arg)}"
   end
 
   def on_notice(m)
-    if @bot.config.host_nicks.include? m.user.nick
+    if m.user && @bot.config.host_nicks.include?(m.user.nick)
       if m.message.include? 'draw'
         t = m.message.split(':')
         @proxy.drawn_card(t[1])
@@ -123,11 +123,12 @@ class UnobotPlugin
         end
 
         if attempts >= 10
-          m.reply '.note kx omg error. (try to type \'.fix\' and then \'.reset\')'
+          @bot.Channel(@bot.config.channels[0]).send '.note kx omg error. (try to type \'.fix\' and then \'.reset\')'
+          $lock = false
         end
 
         @proxy.parse_hand(m.message)
-        @proxy.bot.play_by_value
+        @proxy.ai_engine.play_by_value
         sleep(BotConfig::LAG_DELAY)
         @proxy.get_message_queue.each { |i| @bot.Channel(@bot.config.channels[0]).send i}
         $last_acted_on_turn_message = $last_turn_message
