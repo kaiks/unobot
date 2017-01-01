@@ -81,6 +81,7 @@ class UnoProxy
           unless text.include?('passes')
             (@double_play ? 2 : 1).times {
               @history << CardAction.new(@previous_player, PLAY_ACTION, card, @top_card)
+              @history.last.log_action
             }
             @top_card = card
             if @previous_player != $bot.nick

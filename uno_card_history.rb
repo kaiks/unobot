@@ -5,6 +5,11 @@ ACTION_STRINGS = %w(PLAY PICK PASS)
 
 class CardAction
   attr_reader :player, :action, :attribute, :previous_card
+
+  def log_action
+    log(to_s)
+  end
+
   def initialize(player, action, attribute, previous_card)
     @player = player
     @action = action
