@@ -1,3 +1,3 @@
-require './uno_bot.rb'
-require './misc.rb'
+require './lib/uno_bot.rb'
+require './lib/misc.rb'
 $bot.start

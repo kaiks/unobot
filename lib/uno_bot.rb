@@ -3,10 +3,10 @@
 
 require 'cinch'
 require 'thread'
-require './bot_config.rb'
+require_relative '../bot_config.rb'
 require_relative 'uno_parser.rb'
 require_relative 'pts_ratio_checker.rb'
-require './uno_bot_plugin.rb'
+require_relative './uno_bot_plugin.rb'
 
 
 $lock = true
