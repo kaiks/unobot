@@ -1,8 +1,8 @@
+require '../bot_config'
 require_relative '../lib/uno_ai.rb'
 require_relative '../lib/uno_parser.rb'
 require 'test/unit'
 
-require '../bot_config'
 
 class TestStrategy < Test::Unit::TestCase
   def setup
@@ -210,6 +210,7 @@ class TestStrategy < Test::Unit::TestCase
     prepare_tracker
     @proxy.game_state.one_card!
     card_text = @bot.play_by_value.to_s
+
     assert_equal(card_text, 'rs')
   end
 

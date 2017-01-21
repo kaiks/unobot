@@ -1,6 +1,8 @@
 $DEBUG = false
 $DEBUG_LEVEL = 0
 
+Dir.chdir(File.dirname(__FILE__))
+
 module BotConfig
   LAG_DELAY = 0.3      #sec
   NICK = 'unobot'

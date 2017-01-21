@@ -1,5 +1,5 @@
 require_relative '../lib/uno_ai.rb'
-require_relative '../lib/bot_config.rb'
+require_relative '../bot_config.rb'
 require_relative '../lib/misc.rb'
 require_relative '../lib/uno_parser.rb'
 require 'test/unit'

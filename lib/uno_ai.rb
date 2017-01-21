@@ -51,6 +51,7 @@ class UnoAI
     @proxy.add_message("pl #{card}")
     @hand.destroy(card)
     @busy = false
+    card
   end
 
   def double_play(card)
@@ -58,6 +59,7 @@ class UnoAI
     @hand.destroy(card)
     @hand.destroy(card)
     @busy = false
+    card
   end
 
 
@@ -157,11 +159,11 @@ class UnoAI
     #both players have one card
     if game_state.one_card? && path_valid?(longest_path) && turn_score(longest_path[2]) < 2 && longest_path[2].size == @hand.size && !game_state.in_war?
       bot_debug 'We are assuming that we can end the game right now.'
-      playable_cards[0].set_wild_color best_chain_color if playable_cards[0].special_card?
-      if playable_cards.length > 1 && playable_cards[0].code == playable_cards[1].code
-        return double_play playable_cards[0]
+      longest_path[0].set_wild_color best_chain_color if longest_path[0].special_card?
+      if longest_path.length > 1 && longest_path[2][0].code == longest_path[2][1].code
+        return double_play longest_path[0]
       else
-        return play playable_cards[0]
+        return play longest_path[0]
       end
 
     end
@@ -305,7 +307,7 @@ class UnoAI
       #the line below is incorrect: ai shouldn't interact with tracker stack
       stack_color_counts = tracker.stack.group_by { |c| c.color }.each_with_object({}) { |(k, v), h| h[k] = v.length }
 
-      hand_color_counts.each { |k, v| v -= stack_color_counts[k] }
+      hand_color_counts.each { |k, v| hand_color_counts[k] -= stack_color_counts[k] }
 
       hand_colors_ordered = hand_color_counts.to_a.sort_by { |x| -x[1] }.map { |c| c[0] }
       #stack_colors_ordered = stack_color_counts.to_a.sort_by { |x| x[1] }.map { |c| c[0] }
