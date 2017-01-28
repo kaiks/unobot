@@ -160,7 +160,7 @@ class UnoAI
     if game_state.one_card? && path_valid?(longest_path) && turn_score(longest_path[2]) < 2 && longest_path[2].size == @hand.size && !game_state.in_war?
       bot_debug 'We are assuming that we can end the game right now.'
       longest_path[0].set_wild_color best_chain_color if longest_path[0].special_card?
-      if longest_path.length > 1 && longest_path[2][0].code == longest_path[2][1].code
+      if longest_path[2].length > 1 && longest_path[2][0].code == longest_path[2][1].code
         return double_play longest_path[0]
       else
         return play longest_path[0]

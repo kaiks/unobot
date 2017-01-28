@@ -10,6 +10,12 @@ class UnoCard
     puts text if $DEBUG
   end
 
+  #randomly generates a card
+  # note: does not reflect real card distribution, i.e. every card has the same likelihood
+  def self.random
+    UnoCard.new(Uno::COLORS.sample, Uno::FIGURES.sample)
+  end
+
   def initialize(color, figure)
     figure = figure.downcase if figure.is_a? String
     color = color.downcase if color.is_a? String
