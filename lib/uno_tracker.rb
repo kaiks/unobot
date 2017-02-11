@@ -155,7 +155,7 @@ class Tracker
     #todo: infer no reverses, +2s and wd4s
     picked_cards = []
     total_picked = {}
-    @play_history[-6..-1].reverse.
+    @play_history[-([5, @play_history.length].min)..-1].reverse.
         select{|a| a.action == PICK_ACTION && a.player != $bot.nick}.each {|action|
           total_picked[action.player] ||= 0
           total_picked[action.player] +=  action.attribute
