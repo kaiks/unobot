@@ -83,11 +83,15 @@ class UnobotPlugin
 
   def on_reload m
     @proxy.game_state.reset
-    load 'uno_parser.rb'
-    load 'uno_card.rb'
-    load 'uno_ai.rb'
-    load 'uno_tracker.rb'
-    load 'uno_bot.rb'
+    begin
+      load 'lib/uno_parser.rb'
+      load 'lib/uno_card.rb'
+      load 'lib/uno_ai.rb'
+      load 'lib/uno_tracker.rb'
+      load 'lib/uno_bot.rb'
+    rescue Exception => e
+      m.reply "Failed: #{e.to_s}"
+    end
     m.reply 'ca'
   end
 
