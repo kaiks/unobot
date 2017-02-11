@@ -105,7 +105,11 @@ class UnobotPlugin
 
   def on_eval m, arg
     ensure_admin_nick m.user.nick
-    m.reply "#{eval(arg)}"
+    begin
+      m.reply "#{eval(arg)}"
+    rescue Exception => e
+      m.reply "Failed: #{e.to_s}"
+    end
   end
 
   def on_notice(m)
