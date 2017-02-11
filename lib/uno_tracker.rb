@@ -188,7 +188,7 @@ class Tracker
   end
 
   def history_colors_picked
-    @play_history[-5..-1].
+    @play_history[-([5, @play_history.length].min)..-1].
         select{|a| a.action == PICK_ACTION && action.player != $bot.nick}.
         map{|a| a.previous_card.color}.
         uniq
