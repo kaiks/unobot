@@ -26,6 +26,21 @@ class TestStrategy < Test::Unit::TestCase
     assert_equal(@bot.more_cards_than_adversary?, true)
   end
 
+  def test_play_card
+    @bot.hand = Hand.from_text(['g1', 'g1', 'g3', 'g8'])
+    card_played = @bot.hand[0]
+    result = @bot.play card_played
+    assert_equal(result, card_played)
+    assert_equal(@bot.hand, Hand.from_text(['g1', 'g3', 'g8']))
+  end
+
+  def test_double_play
+    @bot.hand = Hand.from_text(['g1', 'g1', 'g3', 'g8'])
+    card_played = @bot.hand[0]
+    result = @bot.double_play card_played
+    assert_equal(result, card_played)
+    assert_equal(@bot.hand, Hand.from_text(['g3', 'g8']))
+  end
 
 
 end

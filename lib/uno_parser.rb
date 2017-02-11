@@ -59,6 +59,7 @@ class UnoProxy
           @tracker.adversaries[text.split[1]].card_count = 2 unless text.include? $bot.nick
         when /.*Top card: .*/
           @lock = 1
+          @tracker.reset_cache
           @previous_player = @active_player
           @turn_counter += 1
 
@@ -96,7 +97,6 @@ class UnoProxy
           @top_card = card
           if text.include? $bot.nick
             if !text.include? "#{$bot.nick} passes"
-              @tracker.reset_cache
               @tracker.calculate_color_probabilities
               @tracker.look_through_play_history
               $last_turn_message = Time.now unless text.include? "#{$bot.nick} passes"

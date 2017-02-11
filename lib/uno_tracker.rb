@@ -52,6 +52,9 @@ class Tracker
 
   def reset_cache
     @prob_cache = {}
+    if @copied_stack
+      restore_stack
+    end
   end
 
   #This is not exact. For example, it does not take into account changing color from wild by skips
@@ -91,7 +94,6 @@ class Tracker
   end
 
 
-  #todo: consider card history
   # number of cards from the stack that can change color from a given normal card
   # e.g. argument: r6, changing cards: b6 g6 y6 w wd4
   def color_changing_cards(card)
@@ -148,12 +150,16 @@ class Tracker
     }
   end
 
+
   def look_through_play_history
     #todo: infer no reverses, +2s and wd4s
     picked_cards = []
-    @play_history.reverse.
-        select{|a| a.action == PICK_ACTION && a.player != $bot.nick}[0..5].each {|action|
-          if action.attribute > 2
+    total_picked = {}
+    @play_history[-6..-1].reverse.
+        select{|a| a.action == PICK_ACTION && a.player != $bot.nick}.each {|action|
+          total_picked[action.player] ||= 0
+          total_picked[action.player] +=  action.attribute
+          if total_picked[action.player] > 3
             break
           elsif action.attribute == 1
             picked_cards |= [action.previous_card]
@@ -162,8 +168,7 @@ class Tracker
 
     picked_cards.each { |card|
       @prob_cache[card.color] = 0.0
-      #fix it for every card of the same figure
-      @prob_cache[5000 + card.code] = 0.0
+      @stack.reject!{|x| x.color == card.color || x.figure == card.figure }
     }
   end
 
@@ -173,9 +178,17 @@ class Tracker
 
   private
 
+  def backup_stack
+    @copied_stack = @stack.dup
+  end
+
+  def restore_stack(destroy_old = true)
+    @stack = @copied_stack
+    @copied_stack = nil if destroy_old
+  end
 
   def history_colors_picked
-    @play_history[-7..-1].
+    @play_history[-5..-1].
         select{|a| a.action == PICK_ACTION && action.player != $bot.nick}.
         map{|a| a.previous_card.color}.
         uniq
