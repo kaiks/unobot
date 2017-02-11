@@ -86,6 +86,8 @@ class UnobotPlugin
     load 'uno_parser.rb'
     load 'uno_card.rb'
     load 'uno_ai.rb'
+    load 'uno_tracker.rb'
+    load 'uno_bot.rb'
     m.reply 'ca'
   end
 
