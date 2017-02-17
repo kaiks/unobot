@@ -133,8 +133,8 @@ class UnoProxy
       bot_debug "[parse_hand] card_texts: #{card_texts.join('//')}"
       cards = card_texts.map { |ct| parse_card_text(ct) }
       bot_debug "[parse_hand] parsed: #{cards.to_s}", 2
-      if cards.length == 1 && drawn == true
-        @ai_engine.hand << cards[0]
+      if drawn
+        @ai_engine.hand += cards
       else
         @ai_engine.hand = Hand.new(cards)
       end
