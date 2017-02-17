@@ -134,7 +134,7 @@ class UnoProxy
       cards = card_texts.map { |ct| parse_card_text(ct) }
       bot_debug "[parse_hand] parsed: #{cards.to_s}", 2
       if drawn
-        @ai_engine.hand += cards
+        @ai_engine.hand << cards
       else
         @ai_engine.hand = Hand.new(cards)
       end
