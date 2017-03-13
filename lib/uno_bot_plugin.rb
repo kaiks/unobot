@@ -15,10 +15,17 @@ class UnobotPlugin
   match /reset/,  method: :on_reset
   match /fix/,  method: :on_fix
   match /^(.+)/, method: :on_any_message, use_prefix: false
-
   match /eval (.*)/, method: :on_eval, use_prefix: false
 
+  timer 60, method: :save_log
+
+
   listen_to :notice, :method => :on_notice
+
+  def save_log
+    puts "saving file..."
+    @bot.loggers[1].output.fsync
+  end
 
   def ensure_bot_nick nick
     return unless @bot.config.host_nicks.include? nick

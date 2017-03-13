@@ -23,6 +23,7 @@ $bot = Cinch::Bot.new do
     c.admin_nicks         = BotConfig::ADMIN_NICKS
     c.messages_per_second = BotConfig::MESSAGES_PER_SECOND
     c.engine              = nil
+    c.verbose             = false
     c.plugins.plugins = [UnobotPlugin]
 
     if c.server == 'localhost'
@@ -31,3 +32,5 @@ $bot = Cinch::Bot.new do
     end
   end
 end
+$bot.loggers << Cinch::Logger::FormattedLogger.new(File.open("logs/exceptions.log", "a"))
+$bot.loggers[1].level = :error
