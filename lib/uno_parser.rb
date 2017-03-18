@@ -35,6 +35,7 @@ class UnoProxy
   def parse_main(nick, text)
     if host? nick
       bot_debug "[parse_main] Bot says: #{text}"
+      @tracker.update(text, @stack_size)
       case text
         when /must respond/
           @game_state.war!
@@ -73,8 +74,6 @@ class UnoProxy
           card = parse_card_text(card_text)
 
 
-
-          @tracker.update(text, @stack_size)
           update_game_state(text, card)
 
 

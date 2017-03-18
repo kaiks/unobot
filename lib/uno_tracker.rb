@@ -173,7 +173,7 @@ class Tracker
   end
 
   def default_adversary
-    @adversaries[@adversaries.keys[0]]
+    @adversaries.values[0]
   end
 
   private
