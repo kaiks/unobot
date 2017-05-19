@@ -28,11 +28,11 @@ class UnobotPlugin
   end
 
   def ensure_bot_nick nick
-    return unless @bot.config.host_nicks.include? nick
+    @bot.config.host_nicks.include?(nick)
   end
 
   def ensure_admin_nick nick
-    return unless @bot.config.host_nicks.include? nick
+    @bot.config.host_nicks.include?(nick)
   end
 
   def initialize(*args)
@@ -76,12 +76,12 @@ class UnobotPlugin
   end
 
   def on_game_start_non_ladder m
-    ensure_bot_nick m.user.nick
+    ensure_bot_nick(m.user.nick) or return
     m.reply 'jo' if @autojoin
   end
 
   def on_game_start m
-    ensure_bot_nick m.user.nick
+    ensure_bot_nick(m.user.nick) or return
     if @autojoin && can_play_with?(@last_creator)
       m.reply 'jo'
       @proxy.tracker.reset
@@ -115,7 +115,7 @@ class UnobotPlugin
   end
 
   def on_eval m, arg
-    ensure_admin_nick m.user.nick
+    ensure_admin_nick(m.user.nick) or return
     begin
       m.reply "#{eval(arg)}"
     rescue Exception => e
@@ -156,7 +156,7 @@ class UnobotPlugin
   end
 
   def on_any_message m
-    ensure_bot_nick m.user.nick
+    ensure_bot_nick(m.user.nick) or return
     @proxy.parse_main(m.user.nick, m.message)
   end
 
