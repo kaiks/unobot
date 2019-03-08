@@ -32,7 +32,7 @@ class UnobotPlugin
   end
 
   def ensure_admin_nick nick
-    @bot.config.host_nicks.include?(nick)
+    @bot.config.admin_nicks.include?(nick)
   end
 
   def initialize(*args)
