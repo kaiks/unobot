@@ -7,7 +7,7 @@ class ProbabilityFinder < PathFinder
     if hand.length < HAND_LIMIT
       best_score = 0
       best_permutation = []
-      hand.permutation(hand.length) { |p|
+      hand.permutation(hand.length) do |p|
         next unless p[0].plays_after? @last_card
         probability_output = smart_probability(p)
         bot_debug "Before: #{probability_output}", 3
@@ -18,12 +18,12 @@ class ProbabilityFinder < PathFinder
           best_score = probability_score
           best_permutation = p
         end
-      }
-      bot_debug "Found best permutation: #{best_permutation.map { |c| c.to_s }.to_s}"
-      if best_permutation.length > 0 && best_permutation[0].special_card?
+      end
+      bot_debug "Found best permutation: #{best_permutation.map(&:to_s)}"
+      if !best_permutation.empty? && best_permutation[0].special_card?
         best_permutation[0].set_wild_color first_non_wild_color(best_permutation)
       end
-      return best_permutation
+      best_permutation
     else
       raise 'we should not be here'
     end

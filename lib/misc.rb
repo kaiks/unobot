@@ -1,22 +1,22 @@
-#todo: separate logger from the rest
-#require 'extend_logger.rb'
+# TODO: separate logger from the rest
+# require 'extend_logger.rb'
 require 'logger'
 
 $logger = Logger.new('logs/unobot.log', 'daily', 10)
 $logger_queue = Queue.new
-$logger.datetime_format = "%H:%M:%S"
+$logger.datetime_format = '%H:%M:%S'
 
-$logger_thread = Thread.new {
-  while true
+$logger_thread = Thread.new do
+  loop do
     while $DEBUG == true && $bot && $bot.config.engine.busy == false
       $logger.add(Logger::INFO, $logger_queue.pop)
     end
     sleep(0.5)
   end
-}
+end
 
 def log(text)
-   $logger_queue << ('\n' << text)
+  $logger_queue << ('\n' << text)
 end
 
 def bot_debug(text, detail = 1)
@@ -38,18 +38,18 @@ def unset_debug
 end
 
 class Array
-  #array exists and has nth element (1=array start) not null
-  def exists_and_has n
-    size >= n && !at(n-1).nil?
+  # array exists and has nth element (1=array start) not null
+  def exists_and_has(n)
+    size >= n && !at(n - 1).nil?
   end
 
-  def equal_partial? array
-    each_with_index.all? { |a,i| :_ == a || :_ == array[i] || a == array[i] }
+  def equal_partial?(array)
+    each_with_index.all? { |a, i| a == :_ || array[i] == :_ || a == array[i] }
   end
 end
 
 class NilClass
-  def exists_and_has n
+  def exists_and_has(_n)
     false
   end
 end

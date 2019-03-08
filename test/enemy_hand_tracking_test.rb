@@ -8,7 +8,7 @@ require_relative '../lib/uno_bot.rb'
 $bot.instance_eval("@name = 'unobot'")
 
 class TestStrategy < Test::Unit::TestCase
-  ADVERSARY_NICK = 'Testing'
+  ADVERSARY_NICK = 'Testing'.freeze
   def setup
     @proxy = UnoProxy.new(nil)
     @bot = UnoAI.new(@proxy, 0)
@@ -47,7 +47,7 @@ class TestStrategy < Test::Unit::TestCase
   def test_3
     set_debug 5
     assert_equal(@bot.default_adversary.card_count, 7)
-    @proxy.parse_main('ZbojeiJureq', "Next player must respond or draw 4 more cards (total 4)")
+    @proxy.parse_main('ZbojeiJureq', 'Next player must respond or draw 4 more cards (total 4)')
     @proxy.parse_main('ZbojeiJureq', "#{ADVERSARY_NICK}'s turn. Top card: 12[WD4]")
     @proxy.parse_main('ZbojeiJureq', "#{ADVERSARY_NICK} passes. unobot's turn. Top card: 12[WD4]")
     assert_equal(@bot.default_adversary.card_count, 11)
@@ -59,10 +59,9 @@ class TestStrategy < Test::Unit::TestCase
     assert_equal(@bot.default_adversary.card_count, 7)
     @proxy.instance_eval("@active_player = 'unobot'")
     @proxy.parse_main('ZbojeiJureq', "#{ADVERSARY_NICK}'s turn. Top card: 12[4]")
-    @proxy.parse_main('ZbojeiJureq', "unobot was skipped!")
+    @proxy.parse_main('ZbojeiJureq', 'unobot was skipped!')
     @proxy.parse_main('ZbojeiJureq', "#{ADVERSARY_NICK}'s turn. Top card: 12[S]")
     @proxy.parse_main('ZbojeiJureq', "unobot's turn. Top card: 12[6]")
     assert_equal(@bot.default_adversary.card_count, 5)
   end
-
 end

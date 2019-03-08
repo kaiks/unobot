@@ -1,5 +1,4 @@
 module Cinch
-
   class User
     attr_accessor :authentication
 
@@ -8,7 +7,6 @@ module Cinch
     end
   end
 end
-
 
 module Cinch
   module Plugins
@@ -22,9 +20,9 @@ module Cinch
 
       def load_plugin(m, plugin, mapping)
         if m.user.has_admin_access?
-          mapping ||= plugin.gsub(/(.)([A-Z])/) { |_|
-            $1 + "_" + $2
-          }.downcase # we downcase here to also catch the first letter
+          mapping ||= plugin.gsub(/(.)([A-Z])/) do |_|
+            Regexp.last_match(1) + '_' + Regexp.last_match(2)
+          end.downcase # we downcase here to also catch the first letter
 
           file_name = "plugins/#{mapping}.rb"
           unless File.exist?(file_name)
@@ -34,7 +32,7 @@ module Cinch
 
           begin
             load(file_name)
-          rescue
+          rescue StandardError
             m.reply "Could not load #{plugin}."
             raise
           end

@@ -8,7 +8,7 @@ class PathFinder
     @tracker = tracker
   end
 
-  def find(hand)
+  def find(_hand)
     raise 'Virtual method'
   end
 end

@@ -4,7 +4,6 @@ require_relative '../lib/misc.rb'
 require_relative '../lib/uno_parser.rb'
 require 'test/unit'
 
-
 class TestStrategy < Test::Unit::TestCase
   def setup
     @proxy = UnoProxy.new(nil)
@@ -18,47 +17,43 @@ class TestStrategy < Test::Unit::TestCase
     @proxy.game_state.reset
   end
 
-
-
   def test_attempt_color_change_1
-    @bot.hand.from_text ['y6', 'ys', 'gs', 'ww']
+    @bot.hand.from_text %w[y6 ys gs ww]
     @bot.attempt_color_change
-    path_s = @bot.predefined_path.map{|c| c.to_s}.to_s
-    assert_equal(path_s,'["wy"]',
+    path_s = @bot.predefined_path.map(&:to_s).to_s
+    assert_equal(path_s, '["wy"]',
                  "Wrong path: #{path_s}")
   end
 
   def test_attempt_color_change_2
-    @bot.hand.from_text ['y6', 'ys', 'gs']
+    @bot.hand.from_text %w[y6 ys gs]
     @bot.attempt_color_change
-    path_s = @bot.predefined_path.map{|c| c.to_s}.to_s
-    assert_equal(path_s,'["gs", "ys"]',
+    path_s = @bot.predefined_path.map(&:to_s).to_s
+    assert_equal(path_s, '["gs", "ys"]',
                  "Wrong path: #{path_s}")
   end
 
   def test_attempt_color_change_3
-    @bot.hand.from_text ['y6', 'yr', 'gr', 'gr']
+    @bot.hand.from_text %w[y6 yr gr gr]
     @bot.attempt_color_change
-    path_s = @bot.predefined_path.map{|c| c.to_s}.to_s
-    assert_equal(path_s,'["gr", "gr", "yr"]',
+    path_s = @bot.predefined_path.map(&:to_s).to_s
+    assert_equal(path_s, '["gr", "gr", "yr"]',
                  "Wrong path: #{path_s}")
   end
 
   def test_get_offensive_path_1
     @bot.hand.from_text ['y6', 'ys', 'gs', 'ww', 'y+2']
-    path_s = @bot.get_offensive_path.map{|c|c.to_s}.to_s
-    assert_equal(path_s,'["gs", "ys", "y+2"]',
+    path_s = @bot.get_offensive_path.map(&:to_s).to_s
+    assert_equal(path_s, '["gs", "ys", "y+2"]',
                  "Wrong path: #{path_s}")
   end
 
   def test_get_offensive_path_2
-    @bot.hand.from_text ['y6', 'yr','yr', 'gr', 'gr', 'ww', 'y+2']
-    path_s = @bot.get_offensive_path.map{|c|c.to_s}.to_s
-    assert_equal(path_s,'["gr", "gr", "yr", "yr", "y+2"]',
+    @bot.hand.from_text ['y6', 'yr', 'yr', 'gr', 'gr', 'ww', 'y+2']
+    path_s = @bot.get_offensive_path.map(&:to_s).to_s
+    assert_equal(path_s, '["gr", "gr", "yr", "yr", "y+2"]',
                  "Wrong path: #{path_s}")
   end
 
-  def test_tracker_1
-
-  end
+  def test_tracker_1; end
 end

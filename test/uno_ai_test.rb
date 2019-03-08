@@ -4,7 +4,6 @@ require_relative '../lib/misc.rb'
 require_relative '../lib/uno_parser.rb'
 require 'test/unit'
 
-
 class TestStrategy < Test::Unit::TestCase
   def setup
     @proxy = UnoProxy.new(nil)
@@ -18,29 +17,25 @@ class TestStrategy < Test::Unit::TestCase
     @proxy.game_state.reset
   end
 
-
-
   def test_more_cards_than_adversary?
     assert_equal(@bot.more_cards_than_adversary?, false)
-    @bot.hand = Hand.from_text(['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8'])
+    @bot.hand = Hand.from_text(%w[g1 g2 g3 g4 g5 g6 g7 g8])
     assert_equal(@bot.more_cards_than_adversary?, true)
   end
 
   def test_play_card
-    @bot.hand = Hand.from_text(['g1', 'g1', 'g3', 'g8'])
+    @bot.hand = Hand.from_text(%w[g1 g1 g3 g8])
     card_played = @bot.hand[0]
     result = @bot.play card_played
     assert_equal(result, card_played)
-    assert_equal(@bot.hand, Hand.from_text(['g1', 'g3', 'g8']))
+    assert_equal(@bot.hand, Hand.from_text(%w[g1 g3 g8]))
   end
 
   def test_double_play
-    @bot.hand = Hand.from_text(['g1', 'g1', 'g3', 'g8'])
+    @bot.hand = Hand.from_text(%w[g1 g1 g3 g8])
     card_played = @bot.hand[0]
     result = @bot.double_play card_played
     assert_equal(result, card_played)
-    assert_equal(@bot.hand, Hand.from_text(['g3', 'g8']))
+    assert_equal(@bot.hand, Hand.from_text(%w[g3 g8]))
   end
-
-
 end

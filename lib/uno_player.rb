@@ -25,7 +25,7 @@ class UnoAdversary < UnoPlayer
   end
 
   def plays(card, double = false)
-    bot_debug "UnoAdversary#plays(#{card}, #{false})"
+    bot_debug "UnoAdversary#plays(#{card}, false)"
     @card_count -= 1
     @card_count -= 1 if double
   end
