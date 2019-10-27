@@ -102,9 +102,9 @@ class UnobotPlugin
 
   def on_reset(m)
     $lock = false
-    m.reply 'ca'
-    sleep(2)
     m.reply 'cd'
+    sleep(2)
+    m.reply 'ca'
   end
 
   def on_fix(m)
