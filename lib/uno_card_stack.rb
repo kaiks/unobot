@@ -2,6 +2,10 @@ require_relative 'uno_card.rb'
 require_relative 'uno_hand.rb'
 
 class CardStack < Hand
+  def initialize(prefill = true)
+    fill if prefill
+  end
+
   def create_discard_pile
     @discard_pile = Hand.new
   end

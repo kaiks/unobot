@@ -9,7 +9,7 @@ class Tracker
   def initialize
     @adversaries = {}
     @played_cards = []
-    @stack = []
+    @stack = CardStack.new
     @prob_cache = {}
   end
 
@@ -20,7 +20,6 @@ class Tracker
   def reset
     @adversaries = {}
     @stack = CardStack.new
-    @stack.fill
   end
 
   def new_adversary(nick)
