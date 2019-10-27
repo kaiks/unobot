@@ -78,10 +78,10 @@ class UnoProxy
             @history.last.log_action
           end
           @top_card = card
-          if @previous_player != $bot.nick
+          if @previous_player && @previous_player != $bot.nick
             @tracker.stack.remove! @top_card, @double_play
             # bot cards have been removed before!
-            @tracker.adversaries[@previous_player].plays @top_card, @double_play unless @previous_player.nil?
+            @tracker.adversaries[@previous_player].plays @top_card, @double_play
           end
         end
 
