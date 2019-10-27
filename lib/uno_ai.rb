@@ -291,7 +291,8 @@ class UnoAI
       # the line below is incorrect: ai shouldn't interact with tracker stack
       stack_color_counts = tracker.stack.group_by(&:color).each_with_object({}) { |(k, v), h| h[k] = v.length }
 
-      hand_color_counts.each { |k, _v| hand_color_counts[k] -= stack_color_counts[k] }
+      # this is a workaround for an exception: nil can't be coerced into Integer
+      hand_color_counts.each { |k, _v| hand_color_counts[k] -= stack_color_counts.fetch(k, 0) }
 
       hand_colors_ordered = hand_color_counts.to_a.sort_by { |x| -x[1] }.map { |c| c[0] }
       # stack_colors_ordered = stack_color_counts.to_a.sort_by { |x| x[1] }.map { |c| c[0] }

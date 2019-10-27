@@ -29,7 +29,7 @@ class Hand < Array
   end
 
   def to_s
-    map(&:to_s).reduce { |old, new| old += " #{new}" }
+    map(&:to_s).join(" ")
   end
 
   def bot_output
