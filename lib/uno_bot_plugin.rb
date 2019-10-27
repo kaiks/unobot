@@ -109,7 +109,7 @@ class UnobotPlugin
 
   def on_fix(m)
     m.reply "Attempting to fix completely broken unobot game state"
-    @proxy.initialize_game_variables
+    @proxy.send(:initialize_game_variables)
     @proxy.tracker.new_adversary m.user.nick
     on_reset(m)
   end
