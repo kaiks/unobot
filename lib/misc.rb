@@ -16,7 +16,7 @@ $logger_thread = Thread.new do
 end
 
 def log(text)
-  $logger_queue << ('\n' << text)
+  $logger_queue << "\n#{text}"
 end
 
 def bot_debug(text, detail = 1)

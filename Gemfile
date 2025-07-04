@@ -1,3 +1,4 @@
 source 'https://rubygems.org'
 
-gem 'cinch'
+# Use Cinch fork directly from GitHub (same as ZbojeiJureq)
+gem 'cinch', git: 'https://github.com/blolol/cinch.git'

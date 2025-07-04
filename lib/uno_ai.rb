@@ -1,14 +1,12 @@
 require_relative 'uno_hand.rb'
 require_relative 'uno_tracker.rb'
+require_relative 'uno_constants.rb'
 # TODO: track what color the enemy didn't have in the last x rounds:
 # using revamped card_history
 # todo: use the above to make color change smart
 # todo: use the above to create figure change
-WAR = 1
-WARWD = 2
-ONE_CARD = 4
-GAME_OFF = 16
-GAME_ON = 0
+
+include UnoConstants
 
 ALGORITHM_CARD_NO_THRESHOLD = 8
 
@@ -97,7 +95,7 @@ class UnoAI
       random_threshold = 6
       randomly_change_color = rand(10) < random_threshold
       with_wd4 = true
-      if has_one_card_or_late_game? || (randomly_change_color && default_adversary.card_count <= 4 && with_wd4 = false)
+      if has_one_card_or_late_game? || (randomly_change_color && default_adversary.card_count <= 4 && with_wd4 == false)
         color_change_success = attempt_color_change with_wd4
         return play_predefined_path if color_change_success
       end
@@ -551,9 +549,7 @@ class UnoAI
   # i should be able to get rid of most of this
   def special_card_penalty(cards, score)
     bot_debug "Special card penalty: #{cards.map(&:to_s).join(' ')} #{score}", 3
-    len = cards.length
     penalty_divisor = 1_000_000_000
-    adversary = tracker.default_adversary
 
     cards.each_with_index do |c, i|
       turns_left = turns_required(cards[i..-1])
@@ -606,7 +602,6 @@ class UnoAI
     hand ||= @hand
     counter = 0
     previous_card = last_card
-    skipped = false
     hand.each_with_index do |c, i|
       previous_card = hand[i - 1] if i > 0
 
@@ -700,10 +695,11 @@ class UnoAI
   end
 
   def calculate_best_path_by_probability_chain
-    if @hand.length < 10
+    hand_length = @hand.length
+    if hand_length < 10
       best_score = 0
       best_permutation = []
-      @hand.permutation(@hand.length) do |p|
+      @hand.permutation(hand_length) do |p|
         next unless p[0].plays_after? last_card
         probability_output = smart_probability(p)
         bot_debug "Before: #{probability_output}", 3
@@ -721,7 +717,22 @@ class UnoAI
       end
       return [best_permutation[0], best_permutation.length, best_permutation] unless best_permutation == []
     else
-      raise 'we should not be here'
+      # For large hands (10+ cards), use a greedy approach instead of full permutation
+      # This avoids exponential complexity while still finding good plays
+      playable_cards = @hand.select { |card| card.plays_after? last_card }
+      return [] if playable_cards.empty?
+      
+      # Sort by strategic value: special cards last, matching colors first
+      sorted_cards = playable_cards.sort_by do |card|
+        score = 0
+        score -= 100 if card.special_card?  # Prefer normal cards
+        score -= 50 if card.color == last_card.color  # Prefer color matches
+        score + card.figure.to_s.to_i  # Prefer higher numbers
+      end
+      
+      best_card = sorted_cards.first
+      best_card.set_wild_color(most_valuable_color) if best_card.wild?
+      return [best_card, 1, [best_card]]
     end
   end
 

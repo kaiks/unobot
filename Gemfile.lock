@@ -1,13 +1,18 @@
+GIT
+  remote: https://github.com/blolol/cinch.git
+  revision: fad9b95a1b893116f661b38c599a155a7696c5a0
+  specs:
+    cinch (2.4.0)
+
 GEM
   remote: https://rubygems.org/
   specs:
-    cinch (2.3.4)
 
 PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
-  cinch
+  cinch!
 
 BUNDLED WITH
    2.3.7

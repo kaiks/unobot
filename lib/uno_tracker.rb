@@ -6,6 +6,8 @@ class Tracker
   attr_reader :adversaries
   attr_reader :prob_cache, :play_history
 
+  MAX_CACHE_SIZE = 10000
+
   def initialize
     @adversaries = {}
     @played_cards = []
@@ -54,6 +56,10 @@ class Tracker
     restore_stack if @copied_stack
   end
 
+  def check_cache_size
+    reset_cache if @prob_cache.size > MAX_CACHE_SIZE
+  end
+
   # This is not exact. For example, it does not take into account changing color from wild by skips
   # Every function has a two digit code. If it is necessary, the code is followed by card code
 
@@ -63,6 +69,7 @@ class Tracker
   end
 
   def change_from_wd4_probability(color)
+    check_cache_size
     @prob_cache[2000 + Uno::COLORS.index(color)] ||=
       has_card_with_property @stack.select { |c| c.figure == :reverse && c.color == color }.length.to_f +
                              has_wd4_probability -

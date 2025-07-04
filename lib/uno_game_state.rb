@@ -1,8 +1,6 @@
-GAME_OFF = 16
-GAME_ON = 0
-WAR = 1
-WARWD = 2
-ONE_CARD = 4
+require_relative 'uno_constants.rb'
+
+include UnoConstants
 
 class GameState
   attr_reader :game_state
@@ -65,10 +63,10 @@ class GameState
 
   def to_s
     states = []
-    states << 'WAR' if has_state? WAR
-    states << 'WARWD' if has_state? WARWD
-    states << 'ONE_CARD' if has_state? ONE_CARD
-    states << 'GAME_OFF' if has_state? GAME_OFF
+    states << 'WAR' if @game_state & WAR != 0
+    states << 'WARWD' if @game_state & WARWD != 0
+    states << 'ONE_CARD' if @game_state & ONE_CARD != 0
+    states << 'GAME_OFF' if @game_state & GAME_OFF != 0
     states.join(' ')
   end
 
