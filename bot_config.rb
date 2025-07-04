@@ -10,6 +10,7 @@ module BotConfig
   HOST_NICKS = %w[ZbojeiJureq ZbojeiJureq_ ZbojeiJureq__].freeze
   ADMIN_NICKS = %w[kx kaiks].freeze
   MESSAGES_PER_SECOND = 2
-  SERVER = 'localhost'.freeze
+  # Use host.docker.internal for Mac/Windows, or host network mode on Linux
+  SERVER = ENV['IRC_SERVER'] || 'host.docker.internal'.freeze
   CHANNELS = ['#kx'].freeze
 end
