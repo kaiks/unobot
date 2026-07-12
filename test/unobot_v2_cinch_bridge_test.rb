@@ -106,6 +106,8 @@ class UnobotV2CinchBridgeTest < Minitest::Test
   def test_machine_callbacks_attach_to_real_runtime_and_action_uses_private_privmsg_target
     @bridge = build_bridge('machine').attach!
     assert_equal 8, @bot.handlers.registered.length
+    assert_same @bridge, @bridge.attach!
+    assert_equal 8, @bot.handlers.registered.length
     assert @bot.handlers.registered.all? { |handler| handler.is_a?(UnobotV2::CinchBridge::OrderedHandler) }
     assert @bot.channel_targets['#uno'].messages.empty?, 'must not register before own JOIN'
 
@@ -223,6 +225,27 @@ class UnobotV2CinchBridgeTest < Minitest::Test
     codes = []
     codes << @bridge.errors.pop.code until @bridge.errors.empty?
     assert_includes codes, :bridge_queue_overflow
+  end
+
+  def test_foreign_channels_and_channel_notices_cannot_create_or_mutate_sessions
+    @bridge = build_bridge('human').attach!
+    @bridge.on_join(fake_message(command: 'JOIN', source: 'Alice', channel: '#uno'))
+    2.times { pop(@bot.channel_targets['#uno'].messages) }
+
+    @bridge.on_channel(fake_message(command: 'PRIVMSG', source: 'Host', channel: '#other',
+                                    recipient: '#other', text: "Alice's turn. Top card: r7"))
+    @bridge.on_join(fake_message(command: 'JOIN', source: 'Alice', channel: '#other'))
+    @bridge.on_leaving(fake_message(command: 'KICK', source: 'Op', channel: '#other'), User.new(nick: 'Alice'))
+    @bridge.on_notice(fake_message(command: 'NOTICE', source: 'Host', channel: '#uno',
+                                   recipient: '#uno', text: 'ordinary channel notice'))
+    wait_until { @bridge.errors.size >= 3 }
+    assert_equal %i[unconfigured_channel unconfigured_channel unconfigured_channel],
+                 3.times.map { @bridge.errors.pop.code }
+    sleep 0.01
+    assert @bridge.errors.empty?, 'channel NOTICE must be ignored, not treated as private state'
+    assert @bot.channel_targets['#other'].messages.empty?
+    sessions = @bridge.runtime.ingress.instance_variable_get(:@sessions)
+    refute sessions.key?('#other')
   end
 
   private

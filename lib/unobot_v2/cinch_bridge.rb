@@ -68,6 +68,9 @@ module UnobotV2
       @overflow_mutex = Mutex.new
       @handlers = []
       @started = false
+      @attached = false
+      @stopped = false
+      @accepting = true
       @connected_once = false
       @worker = nil
       @timer = nil
@@ -75,6 +78,13 @@ module UnobotV2
     end
 
     def attach!
+      @mutex.synchronize do
+        raise RuntimeError, 'Cinch bridge has been stopped' if @stopped
+        return self if @attached
+
+        @attached = true
+        @accepting = true
+      end
       start_worker
       %i[channel private notice connect disconnect join nick leaving].each do |event|
         register_handler(event) { |message, *arguments| dispatch_callback(event, message, *arguments) }
@@ -83,13 +93,19 @@ module UnobotV2
     end
 
     def stop
+      @mutex.synchronize do
+        return self if @stopped
+
+        @accepting = false
+        @stopped = true
+      end
+      @handlers.each(&:unregister)
+      @handlers.clear
       admitted = enqueue_control(STOP)
       if admitted && @worker&.join(@control_timeout).nil?
         report(:bridge_stop_timeout, 'bridge worker did not stop before deadline')
       end
       stop_timer
-      @handlers.each(&:unregister)
-      @handlers.clear
       self
     end
 
@@ -143,6 +159,7 @@ module UnobotV2
 
     def process_channel(snapshot)
       return unless snapshot.command == 'PRIVMSG'
+      return report(:unconfigured_channel, snapshot.channel.to_s) unless configured_channel?(snapshot.channel)
       return unless trusted_host?(snapshot.source)
 
       if mode == 'human'
@@ -162,6 +179,8 @@ module UnobotV2
     end
 
     def process_notice(snapshot)
+      return if snapshot.channel
+
       if mode == 'machine'
         runtime.enqueue(Machine::Event.new(
           source: snapshot.source, recipient: snapshot.recipient, channel: snapshot.channel,
@@ -192,6 +211,7 @@ module UnobotV2
 
     def process_join(snapshot)
       return unless own?(snapshot.source)
+      return report(:unconfigured_channel, snapshot.channel.to_s) unless configured_channel?(snapshot.channel)
 
       @joined << snapshot.channel
       return unless (@channels - @joined.to_a).empty?
@@ -214,6 +234,9 @@ module UnobotV2
 
     def process_leaving(snapshot)
       return unless own?(snapshot.affected_nick)
+      if snapshot.channel && !configured_channel?(snapshot.channel)
+        return report(:unconfigured_channel, snapshot.channel.to_s)
+      end
 
       @joined.delete(snapshot.channel) if snapshot.channel
       lifecycle_each(:disconnect, channel: snapshot.channel)
@@ -256,6 +279,8 @@ module UnobotV2
     end
 
     def enqueue(snapshot)
+      return report(:bridge_stopped, 'bridge is no longer accepting callbacks') unless accepting?
+
       @queue.push(snapshot, true)
       true
     rescue ThreadError
@@ -337,6 +362,14 @@ module UnobotV2
 
     def trusted_host?(nick)
       @host_nicks.any? { |host| host.casecmp?(nick.to_s) }
+    end
+
+    def configured_channel?(channel)
+      @channels.include?(channel.to_s.downcase)
+    end
+
+    def accepting?
+      @mutex.synchronize { @accepting }
     end
 
     def own?(nick)
