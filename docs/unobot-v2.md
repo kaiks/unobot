@@ -73,6 +73,15 @@ atomic authoritative snapshot; and all continuously observed public game
 events use the accepted host strings. Hidden opponent cards and deck order are
 never guessed.
 
+IRC notices do not carry their originating channel. Ingress must therefore
+attach a channel to each private `Human::Event` only when correlation is
+unambiguous (the current legacy deployment configures one game channel). If
+two sessions could both own a hand/status notice, ingress must not deliver it
+to either reducer; both remain unsafe until they are resynchronized one at a
+time. The adapter deliberately has no "most recent channel" guess. Stage 3B
+supplies the opt-in boundaries and queue but does not install a new Cinch
+plugin entry point; runtime selection belongs to Stage 4.
+
 ## Human action syntax
 
 The encoder validates the action against the active safe decision:
