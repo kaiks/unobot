@@ -90,23 +90,25 @@ module UnobotV2
 
         @attached = true
         @accepting = true
-      end
-      start_worker
-      %i[channel private notice connect disconnect join nick leaving].each do |event|
-        register_handler(event) { |message, *arguments| dispatch_callback(event, message, *arguments) }
+        start_worker_unlocked
+        %i[channel private notice connect disconnect join nick leaving].each do |event|
+          register_handler(event) { |message, *arguments| dispatch_callback(event, message, *arguments) }
+        end
       end
       self
     end
 
     def stop
-      @mutex.synchronize do
+      handlers = @mutex.synchronize do
         return self if @stopped
 
         @accepting = false
         @stopped = true
+        current = @handlers.dup
+        @handlers.clear
+        current
       end
-      @handlers.each(&:unregister)
-      @handlers.clear
+      handlers.each(&:unregister)
       admitted = enqueue_control(STOP)
       if admitted && @worker&.join(@control_timeout).nil?
         report(:bridge_stop_timeout, 'bridge worker did not stop before deadline')
@@ -129,12 +131,10 @@ module UnobotV2
 
     private
 
-    def start_worker
-      @mutex.synchronize do
-        return if @worker&.alive?
+    def start_worker_unlocked
+      return if @worker&.alive?
 
-        @worker = Thread.new { consume }
-      end
+      @worker = Thread.new { consume }
     end
 
     def consume

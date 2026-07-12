@@ -23,6 +23,7 @@ module UnobotV2
       ].freeze
       HISTORY_LIMIT = 64
       DEFAULT_ACK_TIMEOUT = 30.0
+      DEFAULT_REGISTRATION_TIMEOUT = 30.0
 
       attr_reader :channel, :own_nick, :host_nick, :game_id, :lifecycle,
                   :active_request, :last_error, :frame_buffer, :callback_errors
@@ -31,7 +32,8 @@ module UnobotV2
       def initialize(channel:, own_nick:, host_nicks:, transport:, on_request: nil,
                      on_status: nil, frame_buffer: FrameBuffer.new,
                      clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) },
-                     ack_timeout: DEFAULT_ACK_TIMEOUT)
+                     ack_timeout: DEFAULT_ACK_TIMEOUT,
+                     registration_timeout: DEFAULT_REGISTRATION_TIMEOUT)
         @channel = channel.to_s.downcase.freeze
         @own_nick = own_nick.to_s.dup.freeze
         @host_nicks = Array(host_nicks).map { |nick| nick.to_s.downcase }.freeze
@@ -45,6 +47,8 @@ module UnobotV2
         @clock = clock
         @ack_timeout = Float(ack_timeout)
         raise ArgumentError, 'ack timeout must be positive' unless @ack_timeout.positive?
+        @registration_timeout = Float(registration_timeout)
+        raise ArgumentError, 'registration timeout must be positive' unless @registration_timeout.positive?
         @lifecycle = :unregistered
         @seen_decisions = []
         @submitted_decision_id = nil
@@ -66,7 +70,9 @@ module UnobotV2
         @game_id = nil
         @frame_buffer.clear
         @lifecycle = :registering
-        send_line(channel, '.uno machine register')
+        result = send_line(channel, '.uno machine register')
+        @registration_started_at = now if result.success?
+        result
       end
 
       def registering? = lifecycle == :registering
@@ -129,6 +135,13 @@ module UnobotV2
         if lifecycle == :awaiting_ack && @action_sent_at && now - @action_sent_at >= @ack_timeout
           return fail_closed!(:ack_timeout, 'action acknowledgement was lost', reregister: true)
         end
+        if lifecycle == :registering && @registration_started_at &&
+           now - @registration_started_at >= @registration_timeout
+          retried = register!
+          return retried if retried.error?
+
+          return failure(:registration_timeout, 'registration response was lost', line: retried.line)
+        end
 
         success
       end
@@ -156,7 +169,7 @@ module UnobotV2
 
       def unregister!
         result = send_line(channel, '.uno machine unregister')
-        invalidate_session!(:unregistered)
+        invalidate_session!(:unregistered) if result.success?
         result
       end
 
@@ -197,6 +210,7 @@ module UnobotV2
 
         @host_nick = source.to_s.dup.freeze
         @game_id = message.game_id
+        @registration_started_at = nil
         @lifecycle = :registered
         @last_error = nil
         status(:registered)
@@ -305,6 +319,7 @@ module UnobotV2
 
         @last_error = message.code.freeze
         @lifecycle = :unregistered
+        @registration_started_at = nil
         status(:registration_error, event: message.code)
         failure(message.code.to_sym, message.code, retryable: message.retryable)
       end
@@ -349,6 +364,7 @@ module UnobotV2
         invalidate_decision!
         @frame_buffer.clear
         @game_id = nil
+        @registration_started_at = nil
         @lifecycle = next_lifecycle
       end
 

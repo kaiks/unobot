@@ -353,6 +353,21 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal 1, @sent.count { |_target, line, _thread| line.include?(' ACTION ') }
   end
 
+  def test_lost_registration_response_retries_only_after_bounded_timeout
+    time = 0.0
+    adapter = build_adapter(clock: -> { time }, registration_timeout: 2)
+    assert_predicate adapter.start, :success?
+    assert_equal 1, @sent.count { |_target, line, _thread| line == '.uno machine register' }
+    time = 1.9
+    assert_predicate adapter.tick, :success?
+    assert_equal 1, @sent.count { |_target, line, _thread| line == '.uno machine register' }
+    time = 2.1
+    result = adapter.tick
+    assert_equal :registration_timeout, result.code
+    assert_equal :registering, adapter.lifecycle
+    assert_equal 2, @sent.count { |_target, line, _thread| line == '.uno machine register' }
+  end
+
   def test_wrong_game_stale_ack_and_unsafe_actions_are_structured_refusals
     register
     request = deliver_state.request
@@ -970,6 +985,36 @@ class UnobotV2RuntimeSelectionTest < Minitest::Test
     result = human.transition_to('machine')
     assert_predicate result, :restart_required?
     assert_equal 'human', human.mode
+  end
+
+  def test_failed_unregister_remains_retryable_and_blocks_fallback_until_delivered
+    sent = []
+    unregister_attempts = 0
+    transport = lambda do |target, line|
+      sent << [target, line]
+      if line == '.uno machine unregister'
+        unregister_attempts += 1
+        raise 'temporary IRC send failure' if unregister_attempts == 1
+      end
+    end
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: @strategy, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: transport, fallback_enabled: true
+    ).start
+    first = runtime.transition_to('human')
+    assert_equal :transport_unavailable, first.code
+    assert_equal 'machine', runtime.mode
+    adapter = runtime.adapter_for('#uno')
+    assert_equal :recovering, adapter.lifecycle
+    assert_predicate adapter, :can_unregister?
+
+    second = runtime.transition_to('human')
+    assert_predicate second, :success?
+    assert_equal 'human', runtime.mode
+    assert_equal 2, unregister_attempts
+    assert_equal ['.uno machine register', '.uno machine unregister',
+                  '.uno machine unregister', 'us', 'ca'], sent.map(&:last)
+    runtime.stop
   end
 
   def test_transition_requested_from_strategy_worker_returns_restart_required_without_deadlock

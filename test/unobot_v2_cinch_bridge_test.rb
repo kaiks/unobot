@@ -38,6 +38,24 @@ class UnobotV2CinchBridgeTest < Minitest::Test
     end
   end
 
+  class BlockingHandlers < Handlers
+    def initialize(started:, release:)
+      super()
+      @started = started
+      @release = release
+      @blocked = false
+    end
+
+    def register(handler)
+      super
+      return if @blocked
+
+      @blocked = true
+      @started << true
+      @release.pop
+    end
+  end
+
   class Loggers
     def exception(error)
       raise error
@@ -272,6 +290,27 @@ class UnobotV2CinchBridgeTest < Minitest::Test
     assert_equal 'human', request.metadata[:transport]
     refute_same @callback_thread, strategy_thread
     assert_equal 'pe', pop(@bot.channel_targets['#uno'].messages)[0]
+  end
+
+  def test_concurrent_stop_cannot_leave_handlers_or_worker_after_partial_attach
+    started = Queue.new
+    release = Queue.new
+    handlers = BlockingHandlers.new(started: started, release: release)
+    @bot.instance_variable_set(:@handlers, handlers)
+    @bridge = build_bridge('machine')
+    attaching = Thread.new { @bridge.attach! }
+    started.pop
+    stopping = Thread.new { @bridge.stop }
+    sleep 0.01
+    assert_predicate stopping, :alive?, 'stop must wait for atomic attachment to finish'
+    release << true
+    attaching.join
+    stopping.join
+
+    assert_empty handlers.registered
+    worker = @bridge.instance_variable_get(:@worker)
+    refute_predicate worker, :alive?
+    assert_raises(RuntimeError) { @bridge.attach! }
   end
 
   private

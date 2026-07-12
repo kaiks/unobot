@@ -8,7 +8,9 @@ module UnobotV2
   module MessagingFactory
     COMMON_KEYS = %i[channel own_nick host_nicks transport on_request].freeze
     HUMAN_KEYS = (COMMON_KEYS + %i[reducer encoder]).freeze
-    MACHINE_KEYS = (COMMON_KEYS + %i[on_status frame_buffer clock ack_timeout]).freeze
+    MACHINE_KEYS = (COMMON_KEYS + %i[
+      on_status frame_buffer clock ack_timeout registration_timeout
+    ]).freeze
 
     module_function
 
