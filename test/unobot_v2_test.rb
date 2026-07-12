@@ -77,6 +77,17 @@ class UnobotV2RulesTest < Minitest::Test
 end
 
 class UnobotV2HumanAdapterTest < Minitest::Test
+  class NoDoubleEncoder < UnobotV2::Human::ActionEncoder
+    def encode(action, request:)
+      canonical = UnobotV2::Canonical::Action.from(action)
+      if canonical.double_play
+        return Result.new(code: :unsupported_double, message: 'fixture encoder cannot emit doubles')
+      end
+
+      super
+    end
+  end
+
   HOST = 'ZbojeiJureq'
   CHANNEL = '#uno-test'
   GREEN_3 = "\x033[3]"
@@ -144,6 +155,24 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     result = @adapter.submit({ action: 'play', card: 'wd4', wild_color: 'yellow', double_play: true },
                              decision_id: request.decision_id)
     assert_equal 'pl wd4ywd4y', result.command
+  end
+
+  def test_human_request_masks_every_variant_an_encoder_cannot_emit
+    requests = []
+    adapter = UnobotV2::Human::Adapter.new(
+      channel: CHANNEL, own_nick: 'Alice', host_nicks: [HOST],
+      transport: ->(_channel, _command) {}, encoder: NoDoubleEncoder.new,
+      on_request: ->(request) { requests << request }
+    )
+    adapter.receive(event(status(players: 'Alice:3,Bob:2'), private: true, recipient: 'Alice'))
+    adapter.receive(event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true, recipient: 'Alice'))
+    reduction = adapter.receive(event("#{RED_5} #{RED_5} #{WD4}", private: true, recipient: 'Alice'))
+
+    assert_equal requests.last, reduction.request
+    assert_equal ['wd4'], reduction.request.playable_cards
+    assert_equal %w[play draw], reduction.request.available_actions
+    assert_equal true, reduction.request.metadata[:human_action_masked]
+    assert_equal ['r5'], reduction.request.metadata[:human_masked_cards]
   end
 
   def test_post_draw_only_picked_card_then_pass

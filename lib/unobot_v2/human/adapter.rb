@@ -35,6 +35,13 @@ module UnobotV2
 
         reduction.commands.each { |command| @transport.call(reducer.channel, command) }
         request = reduction.request
+        if request
+          request = @encoder.mask_request(request)
+          reduction = Reduction.new(
+            request: request, commands: reduction.commands,
+            changed: reduction.changed, reason: reduction.reason
+          )
+        end
         return reduction unless request && request.decision_id != @last_decision_id
         return reduction unless token_valid?(@lifecycle_token)
 
