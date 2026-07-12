@@ -32,6 +32,7 @@ module UnobotV2
       DRAW_RE = /\A(\S+) draws a card\.\z/
       JOIN_RE = /\A(\S+) joins the game\z/
       COUNT_RE = /\ACard count: (.+)\z/
+      ORDER_RE = /\ACurrent (?:order|player order is): (.+)\z/
 
       attr_reader :channel, :own_nick, :phase, :unsafe_reasons
 
@@ -118,6 +119,7 @@ module UnobotV2
         @private_penalty_draw = {}
         @last_turn_line = nil
         @last_status_signature = nil
+        @pending_count_assertions = {}
       end
 
       def host?(nick)
@@ -169,6 +171,8 @@ module UnobotV2
         return game_created if text.match?(/\AOk,? -? ?created .* game on /i)
         return player_joined(JOIN_RE.match(text)[1]) if JOIN_RE.match?(text)
         return counts(COUNT_RE.match(text)[1]) if COUNT_RE.match?(text)
+        return order(ORDER_RE.match(text)[1]) if ORDER_RE.match?(text)
+        return count_announcement(text) if text.include?('has only') || text.include?('has just one card left')
         return turn(TURN_RE.match(text)) if TURN_RE.match?(text)
         return drew(DRAW_RE.match(text)[1]) if DRAW_RE.match?(text)
         return double_pending if text == '[Playing two cards]'
@@ -270,6 +274,27 @@ module UnobotV2
         reduction_with_request
       end
 
+      def order(text)
+        ordered = text.split
+        if ordered.empty? || ordered.uniq.length != ordered.length ||
+           (!@players.empty? && ordered.sort != @players.sort)
+          uncertain!('inconsistent_player_order')
+          return Reduction.new(commands: resync_commands, changed: true)
+        end
+
+        @players = ordered
+        @facts[:players] = 'exact'
+        reduction_with_request
+      end
+
+      def count_announcement(text)
+        match = /(\S+) has (?:only .*three.* cards left|just one card left)!/.match(text)
+        return Reduction.new unless match
+
+        @pending_count_assertions[match[1]] = text.include?('just one') ? 1 : 3
+        Reduction.new(changed: true)
+      end
+
       def turn(match)
         return Reduction.new if match[0] == @last_turn_line
 
@@ -288,6 +313,7 @@ module UnobotV2
         if previous && !passer && previous != current
           decrement(previous, was_double ? 2 : 1)
           remove_own_cards(Canonical::Cards.base(new_top), was_double ? 2 : 1) if previous == own_nick
+          inconsistent ||= !validate_count_assertion(previous)
         elsif passer
           unless passer == previous || previous.nil?
             uncertain!('unexpected_passer')
@@ -325,7 +351,8 @@ module UnobotV2
                       stacked_cards: 'derived', already_picked: 'derived')
         @unsafe_reasons.delete('no_complete_state') if continuously_complete?
         if inconsistent
-          Reduction.new(commands: resync_commands, changed: true, reason: 'inconsistent turn order')
+          reason = @unsafe_reasons.last.to_s.tr('_', ' ')
+          Reduction.new(commands: resync_commands, changed: true, reason: reason)
         else
           reduction_with_request
         end
@@ -452,6 +479,14 @@ module UnobotV2
         return uncertain!('missing_player_count') unless @counts.key?(nick)
 
         @counts[nick] += count
+      end
+
+      def validate_count_assertion(nick)
+        expected = @pending_count_assertions.delete(nick)
+        return true unless expected && @counts[nick] != expected
+
+        uncertain!('inconsistent_player_count')
+        false
       end
 
       def remove_own_cards(card, count)

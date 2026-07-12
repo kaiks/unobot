@@ -211,6 +211,24 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal 8, request.stacked_cards
   end
 
+  def test_order_and_low_card_announcements_are_checked_at_the_play_boundary
+    synchronize(current: 'Bob', players: 'Bob:4,Alice:3,Carol:2')
+    @adapter.receive(event('Current order: Bob Alice Carol'))
+    @adapter.receive(event("Bob has only \x02\x037three\x03\x02 cards left!"))
+    request = @adapter.receive(event("Alice's turn. Top card: #{RED_5}")).request
+    assert request
+    assert_equal 3, request.other_players.find { |player| player.id == 'Bob' }.card_count
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:4,Alice:3,Carol:2')
+    @adapter.receive(event("Bob has only \x02\x037three\x03\x02 cards left!"))
+    @adapter.receive(event('[Playing two cards]'))
+    reduction = @adapter.receive(event("Alice's turn. Top card: #{RED_5}"))
+    assert_nil reduction.request
+    assert_equal 'inconsistent player count', reduction.reason
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
+  end
+
   def test_inconsistent_out_of_order_turn_refuses_and_resynchronizes
     synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2')
     reduction = @adapter.receive(event("Carol's turn. Top card: #{RED_5}"))
