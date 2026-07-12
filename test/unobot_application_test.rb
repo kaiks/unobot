@@ -104,6 +104,16 @@ class UnobotApplicationTest < Minitest::Test
     end
   end
 
+  def test_v2_rejects_two_neural_model_processes_before_manager_startup
+    result = probe(
+      'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'machine', 'UNO_STRATEGY' => 'neural',
+      'UNO_SHADOW_STRATEGY' => 'neural'
+    )
+    refute result[:status].success?
+    assert_match(/permits one model process/, result[:stderr])
+    refute_match(/checkpoint/, result[:stderr])
+  end
+
   def test_v2_wires_permissioned_operations_and_deployment_allowlists_from_environment
     Dir.mktmpdir('unobot-operations') do |directory|
       result = probe(

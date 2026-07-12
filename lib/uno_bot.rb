@@ -53,8 +53,12 @@ $bot.loggers << Cinch::Logger::FormattedLogger.new(File.open('logs/exceptions.lo
 $bot.loggers[1].level = :error
 
 if UNOBOT_RUNTIME == 'v2'
-  $unobot_strategy_manager = UnobotV2::StrategyManager.from_env(env: ENV)
   shadow_name = UnobotV2::Configuration.shadow_strategy(ENV)
+  if UNOBOT_STRATEGY == 'neural' && shadow_name == 'neural'
+    raise UnobotV2::Configuration::Error,
+          'live and shadow neural strategies cannot run together: deployment permits one model process'
+  end
+  $unobot_strategy_manager = UnobotV2::StrategyManager.from_env(env: ENV)
   if shadow_name
     shadow_env = ENV.to_h.merge('UNO_STRATEGY' => shadow_name)
     $unobot_shadow_manager = UnobotV2::StrategyManager.from_env(env: shadow_env)

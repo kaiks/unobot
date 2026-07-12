@@ -27,6 +27,7 @@ class UnobotV2OperationsTest < Minitest::Test
     end
 
     def active? = active
+    def selected_name = selected
 
     def health_check
       @health_checks += 1
@@ -201,6 +202,13 @@ class UnobotV2OperationsTest < Minitest::Test
     refute response[:ok]
     assert_equal :game_active, response[:code]
     assert_equal :invalid_strategy, operations.dispatch('command' => 'select')[:code]
+
+    neural_shadow = FakeManager.new(selected: 'neural')
+    @operations&.stop
+    @operations = nil
+    response = build(shadow: neural_shadow).dispatch('command' => 'select', 'strategy' => 'neural')
+    assert_equal :model_capacity, response[:code]
+    assert_empty @primary.selections.drop(2)
   end
 
   def test_restart_is_single_shot_and_refuses_active_or_unconfigured_use

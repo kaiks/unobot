@@ -201,6 +201,9 @@ module UnobotV2
     def select_strategy(request)
       target = request['strategy'].to_s
       return failure(:invalid_strategy, 'strategy is required') if target.empty?
+      if target.casecmp?('neural') && @shadow&.selected_name == 'neural'
+        return failure(:model_capacity, 'live and shadow strategies cannot both own the neural model')
+      end
 
       result = @primary.select(target)
       result.success? ? success(status_payload) : failure(result.code, 'strategy selection was refused')
