@@ -18,12 +18,12 @@ class BotConfigTest < Minitest::Test
 
     configured = probe(
       'IRC_SERVER' => '127.0.0.1', 'IRC_PORT' => '16667', 'IRC_NICK' => 'Uno_Bot-1',
-      'IRC_MESSAGES_PER_SECOND' => '3', 'UNO_CHANNELS' => '#one,&two',
+      'IRC_MESSAGES_PER_SECOND' => '3', 'UNO_CHANNELS' => '#one,&two,+local,!safe',
       'UNO_HOST_NICKS' => 'Host,Host_', 'UNO_ADMIN_NICKS' => 'Admin'
     )
     assert configured[:status].success?, configured[:stderr]
     assert_equal 16_667, configured[:json].fetch('port')
-    assert_equal %w[#one &two], configured[:json].fetch('channels')
+    assert_equal %w[#one &two +local !safe], configured[:json].fetch('channels')
   end
 
   def test_invalid_port_server_nick_lists_and_rate_fail_before_startup

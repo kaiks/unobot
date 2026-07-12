@@ -5,7 +5,7 @@ Dir.chdir(File.dirname(__FILE__))
 
 module BotConfig
   IRC_NICK = /\A[A-Za-z_\[\]\\`^{}|][A-Za-z0-9_\-\[\]\\`^{}|]{0,29}\z/
-  IRC_CHANNEL = /\A[#&][^\x00\x07\r\n ,:]{1,49}\z/
+  IRC_CHANNEL = /\A[#+&!][^\x00\x07\r\n ,:]{1,49}\z/
   IRC_SERVER = /\A[^\x00\r\n\s]{1,255}\z/
 
   def self.list(name, default, pattern:)
