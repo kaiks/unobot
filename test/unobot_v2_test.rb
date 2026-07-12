@@ -1,0 +1,334 @@
+# frozen_string_literal: true
+
+require_relative 'test_helper'
+require 'json'
+require_relative '../lib/unobot_v2'
+
+class UnobotV2CanonicalTest < Minitest::Test
+  FIXTURES = File.expand_path('fixtures/jedna_protocol_v1/*.json', __dir__)
+
+  def test_vendored_jedna_protocol_fixtures_round_trip
+    Dir[FIXTURES].sort.each do |path|
+      source = JSON.parse(File.read(path))
+      request = UnobotV2::Canonical::DecisionRequest.from_protocol(source)
+
+      assert_predicate request, :frozen?
+      assert_equal source, JSON.parse(JSON.generate(request.protocol_h)), File.basename(path)
+      assert_equal request, UnobotV2::Canonical::DecisionRequest.from_protocol(source)
+    end
+  end
+
+  def test_rejects_invalid_and_mutable_looking_state
+    error = assert_raises(UnobotV2::Canonical::ValidationError) do
+      UnobotV2::Canonical::DecisionRequest.from_protocol({
+        'type' => 'request_action', 'protocol_version' => 1,
+        'state' => JSON.parse(File.read(Dir[FIXTURES].first)).fetch('state').merge('hand' => ['oops'])
+      })
+    end
+    assert_match(/invalid hand card/, error.message)
+  end
+end
+
+class UnobotV2RulesTest < Minitest::Test
+  def setup
+    @rules = UnobotV2::Rules.new
+  end
+
+  def test_matches_all_jedna_fixture_legal_actions
+    Dir[UnobotV2CanonicalTest::FIXTURES].each do |path|
+      state = JSON.parse(File.read(path)).fetch('state')
+      result = @rules.derive(
+        hand: state['hand'], top_card: state['top_card'], game_state: state['game_state'],
+        stacked_cards: state['stacked_cards'], already_picked: state['already_picked'],
+        picked_card: state['picked_card']
+      )
+      assert_equal state['available_actions'], result.available_actions, File.basename(path)
+      assert_equal state['playable_cards'], result.playable_cards, File.basename(path)
+    end
+  end
+
+  def test_wars_reverse_selected_wilds_and_post_draw
+    assert @rules.playable?('rr', 'r+2', 'war_+2')
+    assert @rules.playable?('gr', 'wd4g', 'war_wd4')
+    refute @rules.playable?('rr', 'wd4g', 'war_wd4')
+    refute @rules.playable?('w', 'wd4g', 'war_wd4')
+    result = @rules.derive(hand: %w[r5 r5 b2], top_card: 'r7', game_state: 'normal',
+                           stacked_cards: 0, already_picked: true, picked_card: 'b2')
+    assert_equal ['pass'], result.available_actions
+    assert_empty result.playable_cards
+  end
+end
+
+class UnobotV2HumanAdapterTest < Minitest::Test
+  HOST = 'ZbojeiJureq'
+  CHANNEL = '#uno-test'
+  GREEN_3 = "\x033[3]"
+  RED_5 = "\x034[5]"
+  RED_7 = "\x034[7]"
+  RED_PLUS_2 = "\x034[+2]"
+  WILD = "\x0313[W]"
+  WD4 = "\x0313[WD4]"
+
+  def setup
+    @sent = []
+    @requests = []
+    @adapter = UnobotV2::Human::Adapter.new(
+      channel: CHANNEL, own_nick: 'Alice', host_nicks: [HOST],
+      transport: ->(channel, command) { @sent << [channel, command] },
+      on_request: ->(request) { @requests << request }
+    )
+  end
+
+  def event(text, private: false, recipient: nil, channel: CHANNEL, source: HOST, **extra)
+    UnobotV2::Human::Event.new(channel: channel, source: source, text: text,
+                               private: private, recipient: recipient, **extra)
+  end
+
+  def status(top: 'r7', mode: 'normal', stacked: 0, picked: 0,
+             current: 'Alice', players: 'Alice:3,Bob:2,Carol:1')
+    "UNO_STATUS_V1 phase=active current=#{current} top=#{top} mode=#{mode} " \
+      "stacked_cards=#{stacked} already_picked=#{picked} players=#{players}"
+  end
+
+  def synchronize(hand: "#{RED_5} #{GREEN_3} #{WD4}", **status_options)
+    @adapter.receive(event(status(**status_options), private: true, recipient: 'Alice'))
+    if status_options.fetch(:current, 'Alice') == 'Alice'
+      picked = status_options.fetch(:picked, 0) == 1 ? 'r5' : '-'
+      @adapter.receive(event("UNO_STATUS_PRIVATE_V1 picked_card=#{picked}", private: true, recipient: 'Alice'))
+    end
+    @adapter.receive(event(hand, private: true, recipient: 'Alice'))
+    @requests.last
+  end
+
+  def test_status_hand_resync_action_encoding_and_deduplication
+    request = synchronize
+    assert_equal %w[r5 wd4], request.playable_cards
+    assert_equal %w[play draw], request.available_actions
+    assert_equal 'exact', request.metadata[:confidence]
+
+    duplicate = status
+    @adapter.receive(event(duplicate, private: true, recipient: 'Alice'))
+    assert_equal 1, @requests.length
+
+    result = @adapter.submit({ action: 'play', card: 'wd4', wild_color: 'red', double_play: false },
+                             decision_id: request.decision_id)
+    assert_predicate result, :success?
+    assert_equal [CHANNEL, 'pl wd4r'], @sent.last
+    duplicate_action = @adapter.submit({ action: 'draw' }, decision_id: request.decision_id)
+    assert_equal :duplicate_action, duplicate_action.code
+  end
+
+  def test_double_and_double_wd4_are_expressible_without_restricting_rules
+    request = synchronize(hand: "#{RED_5} #{RED_5} #{WD4} #{WD4}", players: 'Alice:4,Bob:2')
+    result = @adapter.submit({ action: 'play', card: 'r5', double_play: true }, decision_id: request.decision_id)
+    assert_equal 'pl r5r5', result.command
+
+    request = synchronize(hand: "#{WD4} #{WD4}", players: 'Alice:2,Bob:2')
+    result = @adapter.submit({ action: 'play', card: 'wd4', wild_color: 'yellow', double_play: true },
+                             decision_id: request.decision_id)
+    assert_equal 'pl wd4ywd4y', result.command
+  end
+
+  def test_post_draw_only_picked_card_then_pass
+    request = synchronize(hand: "#{GREEN_3} #{RED_5}", picked: 1, players: 'Alice:2,Bob:2')
+    assert_equal ['r5'], request.playable_cards
+    assert_equal %w[play pass], request.available_actions
+    assert_equal 'pa', @adapter.submit({ action: 'pass' }, decision_id: request.decision_id).command
+  end
+
+  def test_war_actions_and_penalty_pass
+    request = synchronize(hand: "#{RED_PLUS_2} \x034[R] #{WD4} #{GREEN_3}", top: 'r+2',
+                          mode: 'war_+2', stacked: 4, players: 'Alice:4,Bob:2')
+    assert_equal %w[r+2 rr wd4], request.playable_cards
+    assert_equal %w[play pass], request.available_actions
+
+    request = synchronize(hand: "#{WD4} \x033[R] #{RED_PLUS_2}", top: 'wd4g',
+                          mode: 'war_wd4', stacked: 8, players: 'Alice:3,Bob:2')
+    assert_equal %w[wd4 gr], request.playable_cards
+    assert_equal 'pa', @adapter.submit({ action: 'pass' }, decision_id: request.decision_id).command
+  end
+
+  def test_continuous_real_transcript_draw_pass_and_private_draw
+    @adapter.receive(event("Ok, created \x02\x0304U\x0309N\x0312O\x0308!\x0f game on #{CHANNEL}, say 'jo' to join in"))
+    @adapter.receive(event('Alice joins the game'))
+    @adapter.receive(event('Bob joins the game'))
+    @adapter.receive(event('Card count: Alice 2, Bob 2'))
+    @adapter.receive(event("#{RED_5} #{GREEN_3}", private: true, recipient: 'Alice'))
+    @adapter.receive(event("Alice's turn. Top card: #{RED_7}"))
+    assert_equal %w[r5], @requests.last.playable_cards
+
+    @adapter.receive(event('Alice draws a card.'))
+    refute @adapter.reducer.safe?
+    @adapter.receive(event("You draw 1 card: #{WILD}", private: true, recipient: 'Alice'))
+    assert @adapter.reducer.safe?
+    assert_equal ['w'], @requests.last.playable_cards
+    @adapter.receive(event("Alice passes. Bob's turn. Top card: #{RED_7}"))
+    refute @adapter.reducer.safe?
+  end
+
+  def test_real_transcript_fixture_replays_in_scope_order
+    fixture_path = File.expand_path('fixtures/human_protocol_v1/transcripts.json', __dir__)
+    events = JSON.parse(File.read(fixture_path)).fetch('normal_start_draw_pass')
+    events.each do |entry|
+      @adapter.receive(event(entry.fetch('text'), private: entry['scope'] == 'private',
+                             recipient: entry['recipient']))
+    end
+    assert_equal 'active', @adapter.reducer.phase
+    refute @adapter.reducer.safe?, 'fixture ends on the opponent turn'
+  end
+
+  def test_reverse_skip_double_wd4_and_war_pass_transitions
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2')
+    @adapter.receive(event('Player order reversed!'))
+    request = @adapter.receive(event("Alice's turn. Top card: \x0312[R]")).request
+    assert_equal %w[Bob Carol], request.other_players.map(&:id)
+    assert_equal 1, request.other_players.first.card_count
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2')
+    @adapter.receive(event('[Playing two cards]'))
+    request = @adapter.receive(event("Alice's turn. Top card: \x0312[5]")).request
+    assert_equal 0, request.other_players.find { |player| player.id == 'Bob' }.card_count
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2')
+    reduction = @adapter.receive(event("Carol's turn. Top card: \x0312[S]"))
+    assert_nil reduction.request
+    assert_empty @adapter.reducer.unsafe_reasons
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3', top: 'r+2', mode: 'war_+2', stacked: 4)
+    request = @adapter.receive(event("Bob passes. Alice's turn. Top card: #{RED_PLUS_2}")).request
+    assert_equal 'normal', request.game_state
+    assert_equal 0, request.stacked_cards
+    assert_equal 6, request.other_players.first.card_count
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3')
+    @adapter.receive(event('[Playing two cards]'))
+    request = @adapter.receive(event("Alice's turn. Top card: \x034[WD4]")).request
+    assert_equal 'war_wd4', request.game_state
+    assert_equal 8, request.stacked_cards
+  end
+
+  def test_inconsistent_out_of_order_turn_refuses_and_resynchronizes
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2')
+    reduction = @adapter.receive(event("Carol's turn. Top card: #{RED_5}"))
+    assert_nil reduction.request
+    assert_equal 'inconsistent turn order', reduction.reason
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
+    refute @adapter.reducer.safe?
+  end
+
+  def test_own_war_penalty_waits_for_pass_and_reconnect_requires_snapshot
+    synchronize(top: 'r+2', mode: 'war_+2', stacked: 4, players: 'Alice:2,Bob:2',
+                hand: "#{RED_5} #{GREEN_3}")
+    @adapter.receive(event("You draw 4 cards: \x0312[1] \x0312[2] \x033[4] \x037[6]",
+                           private: true, recipient: 'Alice'))
+    refute @adapter.reducer.safe?
+    request = @adapter.receive(event("Alice passes. Bob's turn. Top card: #{RED_PLUS_2}")).request
+    assert_nil request
+    assert_empty @adapter.reducer.unsafe_reasons
+
+    before = @sent.length
+    @adapter.receive(event('', kind: :disconnect))
+    assert_equal before, @sent.length
+    @adapter.receive(event('', kind: :reconnect))
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.slice(before, 2)
+    refute @adapter.reducer.safe?
+  end
+
+  def test_observed_and_resynchronized_states_are_differentially_equal
+    @adapter.receive(event('Alice joins the game'))
+    @adapter.receive(event('Bob joins the game'))
+    @adapter.receive(event('Card count: Alice 3, Bob 2'))
+    @adapter.receive(event("#{RED_5} #{GREEN_3} #{WD4}", private: true, recipient: 'Alice'))
+    observed = @adapter.receive(event("Alice's turn. Top card: #{RED_7}")).request
+
+    other = self.class.new('test_status_hand_resync_action_encoding_and_deduplication')
+    other.setup
+    resynced = other.synchronize(players: 'Alice:3,Bob:2')
+    assert_equal observed.state_h, resynced.state_h
+  end
+
+  def test_disconnect_malformed_duplicate_privacy_nick_and_game_end
+    request = synchronize(players: 'Alice:3,Bob:2')
+    @adapter.receive(event("Alice's turn. Top card: #{RED_7}"))
+    assert_equal 1, @requests.length
+
+    @adapter.receive(event("Alice's turn. Top card: broken"))
+    refute @adapter.reducer.safe?
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
+    stale = @adapter.submit({ action: 'draw' }, decision_id: request.decision_id)
+    assert_equal :unsafe_state, stale.code
+
+    @adapter.receive(event("#{RED_5}", private: true, recipient: 'Bob'))
+    refute @adapter.reducer.safe?, 'another player private hand must be ignored'
+    @adapter.receive(event('', kind: :nick, old_nick: 'Alice', new_nick: 'Alice_'))
+    assert_equal 'Alice_', @adapter.reducer.own_nick
+    @adapter.receive(event('Bob gains 30 points.'))
+    assert_equal 'ended', @adapter.reducer.phase
+  end
+
+  def test_multiple_channels_and_non_host_messages_are_isolated
+    synchronize
+    before = @requests.length
+    @adapter.receive(event("Mallory's turn. Top card: #{GREEN_3}", source: 'Mallory'))
+    @adapter.receive(event("Mallory's turn. Top card: #{GREEN_3}", channel: '#other'))
+    assert_equal before, @requests.length
+  end
+end
+
+class UnobotV2SeparationAndQueueTest < Minitest::Test
+  def test_strategy_receives_canonical_state_not_transport
+    fixture = JSON.parse(File.read(Dir[UnobotV2CanonicalTest::FIXTURES].first))
+    request = UnobotV2::Canonical::DecisionRequest.from_protocol(fixture)
+    seen = nil
+    strategy = UnobotV2::LegacyStrategyAdapter.new do |canonical|
+      seen = canonical
+      { action: canonical.available_actions.last }
+    end
+    assert_instance_of UnobotV2::Canonical::Action, strategy.decide(request)
+    assert_same request, seen
+  end
+
+  def test_ordered_consumer_isolates_errors_and_restarts
+    seen = Queue.new
+    errors = Queue.new
+    consumer = UnobotV2::OrderedConsumer.new(on_error: ->(error, _event) { errors << error }) do |value|
+      raise 'boom' if value == 2
+      seen << value
+    end
+    consumer.start
+    [1, 2, 3].each { |value| assert consumer.push(value) }
+    consumer.stop
+    assert_equal [1, 3], [seen.pop, seen.pop]
+    assert_equal 'boom', errors.pop.message
+    assert_same consumer, consumer.restart
+    consumer.stop
+  end
+
+  def test_ordered_consumer_has_a_nonblocking_capacity_boundary
+    seen = Queue.new
+    consumer = UnobotV2::OrderedConsumer.new(capacity: 1) { |value| seen << value }
+    assert consumer.push(:first)
+    refute consumer.push(:overflow)
+    consumer.start.stop
+    assert_equal :first, seen.pop
+  end
+
+  def test_session_manager_keeps_channel_adapters_separate
+    received = Queue.new
+    fake_class = Struct.new(:channel, :received) do
+      def receive(event) = received << [channel, event.text]
+      def resync! = nil
+    end
+    manager = UnobotV2::SessionManager.new(
+      adapter_factory: ->(channel) { fake_class.new(channel, received) }
+    ).start
+    manager.enqueue(UnobotV2::Human::Event.new(channel: '#One', source: 'host', text: 'a'))
+    manager.enqueue(UnobotV2::Human::Event.new(channel: '#Two', source: 'host', text: 'b'))
+    manager.stop
+    assert_equal [['#one', 'a'], ['#two', 'b']], [received.pop, received.pop]
+  end
+end
