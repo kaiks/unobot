@@ -74,26 +74,34 @@ and the initial two-player/single-process limit.
 ### Docker Deployment
 
 ```bash
-# Build the Docker image
-docker build . -t unobot
+# Build the pinned combined Ruby/Python inference image from an accepted Jedna checkout
+JEDNA_ROOT=../jedna UNO_IMAGE=unobot-neural:17.5m deploy/build-image
 
-# Run the container
-docker run -e TZ=Europe/Berlin --mount source=logs,target=/unobot/logs -p 6667:6667 -it unobot
+# Configure the external read-only model and IRC allowlists, then start safely in shadow mode
+export UNO_CHECKPOINT=../jedna/extension-gems/jedna-tournaments/checkpoints/overnight-dagger/checkpoint_17500000_steps.zip
+export IRC_SERVER=irc.example.test UNO_CHANNELS='#uno-test'
+export UNO_HOST_NICKS=ZbojeiJureq UNO_ADMIN_NICKS=operator
+docker compose -f deploy/compose.yaml up -d
 ```
 
-**Note**: On Windows and macOS, update `bot_config.rb` to use `host.docker.internal` instead of `localhost` for the IRC server.
+This bot is an outbound IRC client; no container port is published. The model
+is never built into the image. See [`docs/deployment.md`](docs/deployment.md)
+for provenance, health checks, operator commands, resource limits, and the
+mandatory rollout/rollback gates.
 
 ## Configuration
 
 Edit `bot_config.rb` to configure:
 
 - `SERVER`: IRC server address (default: `localhost`)
+- `PORT`: IRC server port (default: `6667`)
 - `CHANNELS`: IRC channels to join (default: `['#kx']`)
 - `NICK`: Bot nickname (default: `unobot`)
 - `HOST_NICKS`: Nicknames of the Uno game host bot
 
 See [`docs/unobot-v2.md`](docs/unobot-v2.md) for v2 lifecycle and process
-limits.
+limits. Deployment values can be supplied with `IRC_SERVER`, `IRC_PORT`,
+`IRC_NICK`, `UNO_CHANNELS`, `UNO_HOST_NICKS`, and `UNO_ADMIN_NICKS`.
 
 ## Testing
 
