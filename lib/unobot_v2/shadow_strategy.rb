@@ -20,8 +20,23 @@ module UnobotV2
       end
     end
 
-    Decision = Struct.new(:request, :primary_action, :scope, :epoch, keyword_init: true)
-    Lifecycle = Struct.new(:method, :args, :keywords, :scope, :prefix, keyword_init: true)
+    # A gate is an identity-bearing ownership token. Decisions retain the
+    # gates they were admitted through; lifecycle controls replace a gate and
+    # hold its successor closed until the shadow lifecycle call completes.
+    # Reclamation is therefore conditional on both identity and quiescence,
+    # rather than deleting a scope name that a reconnect may already own.
+    class Gate
+      attr_accessor :references, :pending_controls
+
+      def initialize(pending_controls: 0)
+        @references = 0
+        @pending_controls = pending_controls
+      end
+    end
+
+    Generation = Struct.new(:global, :scope, :prefixes, keyword_init: true)
+    Decision = Struct.new(:request, :primary_action, :scope, :generation, keyword_init: true)
+    Lifecycle = Struct.new(:method, :args, :keywords, :scope, :prefix, :gates, keyword_init: true)
     STOP = Object.new.freeze
     FAIL_CLOSED = Object.new.freeze
 
@@ -52,8 +67,9 @@ module UnobotV2
       @pending_controls = {}
       @enqueued_controls = {}
       @inflight = {}
-      @scope_epochs = Hash.new(0)
-      @global_epoch = 0
+      @scope_epochs = {}
+      @prefix_epochs = {}
+      @global_epoch = Gate.new
       @shadow_disabled = false
       @decision_worker = Thread.new { consume_decisions }
       @control_worker = Thread.new { consume_controls }
@@ -110,11 +126,13 @@ module UnobotV2
         return self if @shutdown
 
         @shutdown = true
-        @global_epoch += 1
+        @global_epoch = Gate.new
         clear_decisions_locked
         @pending_controls.clear
         @enqueued_controls.clear
         @control_queue.clear
+        @scope_epochs.clear
+        @prefix_epochs.clear
         [@decision_worker, @control_worker]
       end
       primary.shutdown if primary.respond_to?(:shutdown)
@@ -132,6 +150,8 @@ module UnobotV2
           shadow_disabled: @shadow_disabled,
           queued_decisions: @pending_decisions,
           queued_controls: @pending_controls.length,
+          retained_scopes: @scope_epochs.length,
+          retained_prefixes: @prefix_epochs.length,
           decision_worker_alive: @decision_worker.alive?,
           control_worker_alive: @control_worker.alive?
         }
@@ -149,18 +169,18 @@ module UnobotV2
 
       scope = lifecycle_scope(method, args)
       prefix = method == :cancel_scope
-      item = Lifecycle.new(
-        method: method, args: args.freeze, keywords: keywords.freeze,
-        scope: scope, prefix: prefix
-      ).freeze
       overflow = false
       @mutex.synchronize do
         return false if @shutdown || @shadow_disabled
 
-        invalidate_scope_locked(scope, prefix: prefix)
+        gates = invalidate_scope_locked(scope, prefix: prefix)
+        item = Lifecycle.new(
+          method: method, args: args.freeze, keywords: keywords.freeze,
+          scope: scope, prefix: prefix, gates: gates.freeze
+        ).freeze
         key = prefix ? [:prefix, scope].freeze : (scope || :global)
         if @pending_controls.key?(key)
-          @pending_controls[key] = stronger_control(@pending_controls[key], item)
+          @pending_controls[key] = merge_controls(@pending_controls[key], item)
         elsif @pending_controls.length >= @queue_capacity
           overflow = true
           disable_shadow_locked
@@ -190,9 +210,11 @@ module UnobotV2
           next false
         end
 
-        @scope_epochs[scope] = @scope_epochs.fetch(scope, 0)
-        epoch = [@global_epoch, @scope_epochs.fetch(scope)].freeze
-        item = Decision.new(request: request, primary_action: action, scope: scope, epoch: epoch).freeze
+        generation = retain_generation_locked(scope)
+        item = Decision.new(
+          request: request, primary_action: action, scope: scope,
+          generation: generation
+        ).freeze
         @pending_decisions += 1
         @decision_queue << item
         true
@@ -214,7 +236,8 @@ module UnobotV2
         ensure
           @mutex.synchronize do
             @pending_decisions -= 1 if @pending_decisions.positive?
-            @inflight.delete(item.scope) if @inflight[item.scope] == item.epoch
+            @inflight.delete(item.scope) if @inflight[item.scope].equal?(item.generation)
+            release_generation_locked(item.generation)
             @condition.broadcast
           end
         end
@@ -247,8 +270,8 @@ module UnobotV2
     def observe(item)
       started = monotonic_now
       current = @mutex.synchronize do
-        valid = !@shutdown && !@shadow_disabled && current_epoch_locked?(item)
-        @inflight[item.scope] = item.epoch if valid
+        valid = !@shutdown && !@shadow_disabled && await_generation_locked(item)
+        @inflight[item.scope] = item.generation if valid
         valid
       end
       unless current
@@ -312,6 +335,8 @@ module UnobotV2
       @mutex.synchronize { disable_shadow_locked unless @shadow_disabled || @shutdown }
       report(Observation.new(status: :lifecycle_error, error_code: :shadow_lifecycle_error,
                              error_message: error.message.to_s.byteslice(0, 256)))
+    ensure
+      @mutex.synchronize { release_control_gates_locked(item.gates) }
     end
 
     def observation(request, **values)
@@ -357,18 +382,28 @@ module UnobotV2
     end
 
     def current_epoch_locked?(item)
-      item.epoch == [@global_epoch, @scope_epochs[item.scope]]
+      generation = item.generation
+      return false unless @global_epoch.equal?(generation.global)
+      return false unless @scope_epochs[item.scope].equal?(generation.scope)
+
+      active = matching_prefixes_locked(item.scope)
+      active.length == generation.prefixes.length && active.all? do |prefix, gate|
+        generation.prefixes[prefix].equal?(gate)
+      end
     end
 
     def invalidate_scope_locked(scope, prefix: false)
       if scope.nil?
-        @global_epoch += 1
+        @global_epoch = Gate.new(pending_controls: 1)
+        [@global_epoch]
       elsif prefix
-        @scope_epochs.keys.select { |matching_scope| scope_prefix?(matching_scope, scope) }.each do |matching_scope|
-          @scope_epochs[matching_scope] += 1
-        end
+        gate = Gate.new(pending_controls: 1)
+        @prefix_epochs[scope] = gate
+        [gate]
       else
-        @scope_epochs[scope] += 1
+        gate = Gate.new(pending_controls: 1)
+        @scope_epochs[scope] = gate
+        [gate]
       end
     end
 
@@ -379,22 +414,32 @@ module UnobotV2
       @inflight.key?(item.scope)
     end
 
-    def stronger_control(existing, candidate)
-      return candidate if candidate.method.to_s.start_with?('cancel')
-      return existing if existing.method.to_s.start_with?('cancel')
-
-      candidate
+    def merge_controls(existing, candidate)
+      selected = if candidate.method.to_s.start_with?('cancel')
+                   candidate
+                 elsif existing.method.to_s.start_with?('cancel')
+                   existing
+                 else
+                   candidate
+                 end
+      Lifecycle.new(
+        method: selected.method, args: selected.args, keywords: selected.keywords,
+        scope: selected.scope, prefix: selected.prefix,
+        gates: (existing.gates + candidate.gates).uniq.freeze
+      ).freeze
     end
 
     def disable_shadow_locked
       return if @shadow_disabled
 
       @shadow_disabled = true
-      @global_epoch += 1
+      @global_epoch = Gate.new
       clear_decisions_locked
       @pending_controls.clear
       @enqueued_controls.clear
       @control_queue.clear
+      @scope_epochs.clear
+      @prefix_epochs.clear
       @control_queue << FAIL_CLOSED
     end
 
@@ -414,6 +459,57 @@ module UnobotV2
 
     def scope_prefix?(candidate, prefix)
       candidate == prefix || candidate.start_with?("#{prefix}:")
+    end
+
+    def retain_generation_locked(scope)
+      scope_gate = (@scope_epochs[scope] ||= Gate.new)
+      prefixes = matching_prefixes_locked(scope).freeze
+      gates = [@global_epoch, scope_gate, *prefixes.values].uniq
+      gates.each { |gate| gate.references += 1 }
+      Generation.new(global: @global_epoch, scope: scope_gate, prefixes: prefixes).freeze
+    end
+
+    def release_generation_locked(generation)
+      [generation.global, generation.scope, *generation.prefixes.values].uniq.each do |gate|
+        gate.references -= 1 if gate.references.positive?
+      end
+      reclaim_gate_locked(@scope_epochs, generation.scope)
+      generation.prefixes.each_value { |gate| reclaim_gate_locked(@prefix_epochs, gate) }
+      @condition.broadcast
+    end
+
+    def release_control_gates_locked(gates)
+      Array(gates).each do |gate|
+        gate.pending_controls -= 1 if gate.pending_controls.positive?
+        reclaim_gate_locked(@scope_epochs, gate)
+        reclaim_gate_locked(@prefix_epochs, gate)
+      end
+      @condition.broadcast
+    end
+
+    def reclaim_gate_locked(mapping, gate)
+      return unless gate.references.zero? && gate.pending_controls.zero?
+
+      key = mapping.find { |_candidate, current| current.equal?(gate) }&.first
+      mapping.delete(key) if key
+    end
+
+    def matching_prefixes_locked(scope)
+      @prefix_epochs.select { |prefix, _gate| scope_prefix?(scope, prefix) }
+    end
+
+    def await_generation_locked(item)
+      while current_epoch_locked?(item) && generation_blocked?(item.generation) &&
+            !@shutdown && !@shadow_disabled
+        @condition.wait(@mutex, 0.01)
+      end
+      current_epoch_locked?(item)
+    end
+
+    def generation_blocked?(generation)
+      [generation.global, generation.scope, *generation.prefixes.values].any? do |gate|
+        gate.pending_controls.positive?
+      end
     end
   end
 end

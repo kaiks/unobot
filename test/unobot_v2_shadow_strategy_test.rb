@@ -144,6 +144,39 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     end
   end
 
+  class ReconnectShadow
+    attr_reader :started, :control_started
+
+    def initialize(action)
+      @action = action
+      @decision_gate = Queue.new
+      @control_gate = Queue.new
+      @started = Queue.new
+      @control_started = Queue.new
+    end
+
+    def decide(request)
+      started << request.metadata[:decision_id]
+      @decision_gate.pop if request.metadata[:channel] == '#blocked'
+      @action
+    end
+
+    def game_end_for(*)
+      control_started << true
+      @control_gate.pop
+      :ended
+    end
+
+    def release_control = @control_gate << true
+    def release_decision = @decision_gate << true
+
+    def shutdown
+      release_control
+      release_decision
+      self
+    end
+  end
+
   class ManagerBlockingAgent
     attr_reader :name, :started
 
@@ -354,6 +387,62 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     assert_equal '#b', result_b.channel
     assert_equal '#b', shadow.started.pop(timeout: 1)
     refute wrapper.diagnostics.fetch(:shadow_disabled)
+  end
+
+  def test_same_scope_reconnect_keeps_ownership_when_terminal_control_finishes_late
+    observations = Queue.new
+    shadow = ReconnectShadow.new(@play)
+    wrapper = build(NoopPrimary.new(@draw), shadow, observations, queue_capacity: 4)
+    blocked = request('blocked', channel: '#blocked', game_id: 'ga')
+    old = request('old', channel: '#reconnect', game_id: 'same')
+    fresh = request('fresh', channel: '#reconnect', game_id: 'same')
+
+    assert_equal @draw, wrapper.decide(blocked)
+    assert_equal 'blocked', shadow.started.pop(timeout: 1)
+    assert_equal @draw, wrapper.decide(old)
+    assert_equal :ended, wrapper.game_end_for(old, reason: 'disconnect')
+    shadow.control_started.pop(timeout: 1) || flunk('terminal control did not start')
+
+    # The fresh decision is admitted through the successor gate while the old
+    # lifecycle call is still blocked and while another scope owns the single
+    # decision worker. Finishing the terminal call must not delete its owner.
+    assert_equal @draw, wrapper.decide(fresh)
+    shadow.release_control
+    shadow.release_decision
+
+    results = 3.times.map { observations.pop(timeout: 1) }.to_h do |result|
+      [result.decision_id, result]
+    end
+    assert_equal :ok, results.fetch('blocked').status
+    assert_equal :dropped, results.fetch('old').status
+    assert_equal :shadow_decision_invalidated, results.fetch('old').error_code
+    assert_equal :ok, results.fetch('fresh').status
+    wait_until do
+      diagnostics = wrapper.diagnostics
+      diagnostics.fetch(:retained_scopes).zero? && diagnostics.fetch(:retained_prefixes).zero?
+    end
+  end
+
+  def test_ten_thousand_distinct_terminal_scopes_are_reclaimed
+    observations = Queue.new
+    shadow = FakeStrategy.new(action: @play)
+    wrapper = build(NoopPrimary.new(@draw), shadow, observations, queue_capacity: 4)
+
+    10_000.times do |index|
+      current = request("d#{index}", channel: '#churn', game_id: "g#{index}")
+      assert_equal @draw, wrapper.decide(current)
+      assert_equal :ok, observations.pop(timeout: 1).status
+      wrapper.game_end_for(current, reason: 'churn')
+      assert_equal [:decide, current], shadow.calls.pop(timeout: 1)
+      assert_equal [:game_end_for, current, 'churn'], shadow.calls.pop(timeout: 1)
+      wait_until { wrapper.diagnostics.fetch(:queued_controls).zero? }
+    end
+
+    diagnostics = wrapper.diagnostics
+    assert_equal 0, diagnostics.fetch(:retained_scopes)
+    assert_equal 0, diagnostics.fetch(:retained_prefixes)
+    assert_operator wrapper.instance_variable_get(:@decision_queue).length, :<=, 1
+    assert_operator wrapper.instance_variable_get(:@control_queue).length, :<=, 1
   end
 
   def test_preemption_releases_real_shadow_manager_session_without_orphan
