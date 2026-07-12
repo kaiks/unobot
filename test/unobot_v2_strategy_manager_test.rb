@@ -383,6 +383,39 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     manager&.shutdown
   end
 
+  def test_operator_maintenance_linearizes_with_game_activation
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: { simple: -> { RecordingStrategy.new } }
+    )
+    lease = manager.acquire_maintenance
+    assert_instance_of UnobotV2::StrategyManager::MaintenanceLease, lease
+    assert manager.diagnostics.fetch(:maintenance)
+
+    error = assert_raises(UnobotV2::Configuration::Error) { manager.decide(machine_request) }
+    assert_match(/operator maintenance/, error.message)
+    assert_empty manager.active_game_keys
+
+    assert manager.release_maintenance(lease)
+    refute manager.release_maintenance(lease)
+    assert_equal 'draw', manager.decide(machine_request).action
+    active = manager.acquire_maintenance
+    assert_equal :game_active, active.code
+  ensure
+    manager&.shutdown
+  end
+
+  def test_shutdown_permanently_closes_maintenance_admission
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: { simple: -> { RecordingStrategy.new } }
+    )
+    lease = manager.acquire_maintenance
+    manager.shutdown
+
+    refute manager.release_maintenance(lease)
+    assert_equal :shutdown, manager.acquire_maintenance.code
+    assert_raises(UnobotV2::Configuration::Error) { manager.decide(machine_request) }
+  end
+
   def test_failed_game_start_discards_checked_out_instance_without_accumulating_sessions
     created = []
     manager = UnobotV2::StrategyManager.new(

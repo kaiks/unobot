@@ -17,6 +17,7 @@ module UnobotV2
       def error? = !success?
     end
     Session = Struct.new(:key, :scope, :name, :strategy, keyword_init: true)
+    MaintenanceLease = Struct.new(:manager, :token, keyword_init: true)
 
     def self.from_env(env: ENV, **options)
       selected = Configuration.strategy(env)
@@ -33,6 +34,7 @@ module UnobotV2
       @idle = Hash.new { |hash, key| hash[key] = [] }
       @all_instances = []
       @shutdown = false
+      @maintenance = nil
       @selected_name = normalize(selected)
       validate_supported!(@selected_name)
       # Validate the selected executable/script before IRC can connect. This
@@ -55,34 +57,34 @@ module UnobotV2
       raise
     end
 
-    def select(name)
+    def select(name, maintenance: nil)
       requested = normalize(name)
       validate_supported!(requested)
-      @mutex.synchronize do
-        return Result.new(code: :shutdown, message: 'strategy manager is shut down', strategy: @selected_name) if @shutdown
-        unless @sessions.empty?
-          return Result.new(
-            code: :game_active,
-            message: 'strategy selection is frozen until every active game ends',
-            strategy: @selected_name, game_key: @sessions.keys.sort.join(',')
-          )
-        end
+      lease, owned = maintenance_lease(maintenance)
+      return lease if lease.is_a?(Result)
 
-        if @idle[requested].empty?
-          begin
-            eager = prepare_strategy(requested)
+      needs_prepare = @mutex.synchronize { @idle[requested].empty? }
+      eager = prepare_strategy(requested) if needs_prepare
+      result = @mutex.synchronize do
+        if @shutdown
+          eager&.shutdown if eager&.respond_to?(:shutdown)
+          Result.new(code: :shutdown, message: 'strategy manager is shut down', strategy: @selected_name)
+        else
+          if eager
             @all_instances << eager
             @idle[requested] << eager
-          rescue StandardError => error
-            return Result.new(code: :configuration_error, message: error.message,
-                              strategy: @selected_name)
           end
+          @selected_name = requested
+          Result.new(code: :ok, strategy: requested)
         end
-
-        @selected_name = requested
       end
-      status(:selected, nil, strategy: requested)
-      Result.new(code: :ok, strategy: requested)
+      status(:selected, nil, strategy: requested) if result.success?
+      result
+    rescue StandardError => error
+      eager&.shutdown if eager&.respond_to?(:shutdown)
+      Result.new(code: :configuration_error, message: error.message, strategy: selected_name)
+    ensure
+      release_maintenance(lease) if owned && lease.is_a?(MaintenanceLease)
     end
 
     def game_end(game_key = nil, reason: 'game_end')
@@ -131,6 +133,7 @@ module UnobotV2
         return self if @shutdown
 
         @shutdown = true
+        @maintenance = nil
         @sessions.clear
         @idle.clear
         @all_instances.dup
@@ -144,7 +147,7 @@ module UnobotV2
       @mutex.synchronize do
         {
           selected: @selected_name, active_games: @sessions.keys.sort.freeze,
-          shutdown: @shutdown,
+          shutdown: @shutdown, maintenance: !@maintenance.nil?,
           standby: @idle.transform_values do |strategies|
             strategies.map do |strategy|
               strategy.respond_to?(:diagnostics) ? strategy.diagnostics : { status: :available }
@@ -161,34 +164,83 @@ module UnobotV2
     def active_game_keys = @mutex.synchronize { @sessions.keys.sort.freeze }
     def active? = @mutex.synchronize { !@sessions.empty? }
 
+    # Linearizes an idle-only operator mutation with game activation. The
+    # lease is acquired under the same mutex used by #activate, but the caller
+    # performs maintenance outside that mutex so lifecycle callbacks can call
+    # cancel_scope/game_end without lock recursion.
+    def acquire_maintenance
+      @mutex.synchronize do
+        return Result.new(code: :shutdown, message: 'strategy manager is shut down',
+                          strategy: @selected_name) if @shutdown
+        unless @sessions.empty?
+          return Result.new(code: :game_active, message: 'maintenance is disabled during a game',
+                            strategy: @selected_name, game_key: @sessions.keys.sort.join(','))
+        end
+        if @maintenance
+          return Result.new(code: :maintenance_busy, message: 'strategy maintenance is already active',
+                            strategy: @selected_name)
+        end
+
+        @maintenance = Object.new
+        MaintenanceLease.new(manager: self, token: @maintenance).freeze
+      end
+    end
+
+    def release_maintenance(lease)
+      return false unless lease.is_a?(MaintenanceLease) && lease.manager.equal?(self)
+
+      @mutex.synchronize do
+        return false unless @maintenance.equal?(lease.token)
+
+        @maintenance = nil
+      end
+      true
+    end
+
     # Re-run the selected strategy's bounded startup health check without
     # allowing a game to activate midway through it. Stock strategies have no
     # active health operation; neural performs a real checkpoint inference.
-    def health_check
-      @mutex.synchronize do
-        return Result.new(code: :shutdown, message: 'strategy manager is shut down', strategy: @selected_name) if @shutdown
-        unless @sessions.empty?
-          return Result.new(code: :game_active, message: 'health reload is disabled during a game',
-                            strategy: @selected_name, game_key: @sessions.keys.sort.join(','))
-        end
+    def health_check(maintenance: nil)
+      lease, owned = maintenance_lease(maintenance)
+      return lease if lease.is_a?(Result)
 
-        strategy = @idle[@selected_name].first
-        raise Configuration::Error, "no standby #{@selected_name} strategy is available" unless strategy
+      strategy = @mutex.synchronize do
+        found = @idle[@selected_name].first
+        raise Configuration::Error, "no standby #{@selected_name} strategy is available" unless found
 
-        if strategy.respond_to?(:health_check!)
-          strategy.health_check!
-        elsif strategy.respond_to?(:startup_health_check!)
-          strategy.startup_health_check!
-        end
+        found
+      end
+      if strategy.respond_to?(:health_check!)
+        strategy.health_check!
+      elsif strategy.respond_to?(:startup_health_check!)
+        strategy.startup_health_check!
       end
       status(:health_checked, nil, strategy: selected_name)
       Result.new(code: :ok, strategy: selected_name)
     rescue StandardError => error
       status(:health_failed, error.message, strategy: selected_name)
       Result.new(code: :health_failed, message: 'strategy health check failed', strategy: selected_name)
+    ensure
+      release_maintenance(lease) if owned && lease.is_a?(MaintenanceLease)
     end
 
     private
+
+    def maintenance_lease(provided)
+      if provided
+        valid = @mutex.synchronize do
+          provided.is_a?(MaintenanceLease) && provided.manager.equal?(self) &&
+            @maintenance.equal?(provided.token)
+        end
+        return [Result.new(code: :maintenance_required, message: 'maintenance lease is stale',
+                           strategy: selected_name), false] unless valid
+
+        return [provided, false]
+      end
+
+      acquired = acquire_maintenance
+      [acquired, acquired.is_a?(MaintenanceLease)]
+    end
 
     def prepare_strategy(name)
       strategy = @factories.fetch(name).call
@@ -204,6 +256,7 @@ module UnobotV2
       started = false
       session = @mutex.synchronize do
         raise Configuration::Error, 'strategy manager is shut down' if @shutdown
+        raise Configuration::Error, 'strategy manager is under operator maintenance' if @maintenance
         existing = @sessions[key]
         next existing if existing
 

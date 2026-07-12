@@ -80,6 +80,11 @@ if UNOBOT_RUNTIME == 'v2'
       socket_path: operations_socket, bridge: $unobot_v2_bridge,
       primary: $unobot_strategy_manager, shadow: $unobot_shadow_manager,
       timeout: Float(ENV.fetch('UNO_OPERATIONS_TIMEOUT', '5')),
+      input_timeout: Float(ENV.fetch('UNO_OPERATIONS_INPUT_TIMEOUT', '1')),
+      output_timeout: Float(ENV.fetch('UNO_OPERATIONS_OUTPUT_TIMEOUT', '1')),
+      shutdown_timeout: Float(ENV.fetch('UNO_OPERATIONS_SHUTDOWN_TIMEOUT', '30')),
+      worker_count: Integer(ENV.fetch('UNO_OPERATIONS_WORKERS', '4')),
+      client_capacity: Integer(ENV.fetch('UNO_OPERATIONS_CLIENT_CAPACITY', '32')),
       on_restart: -> { $bot.quit('operator requested restart') }
     ).start
   end

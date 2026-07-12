@@ -13,6 +13,7 @@ class UnobotV2OperationsTest < Minitest::Test
   end
 
   class FakeManager
+    Lease = Struct.new(:manager, :token, keyword_init: true)
     attr_accessor :active, :health_result, :select_result
     attr_reader :selected, :health_checks, :selections
 
@@ -24,17 +25,37 @@ class UnobotV2OperationsTest < Minitest::Test
       @health_result = Result.new(code: :ok)
       @select_result = nil
       @health = health
+      @maintenance = nil
     end
 
     def active? = active
     def selected_name = selected
 
-    def health_check
+    def acquire_maintenance
+      return Result.new(code: :game_active) if active
+      return Result.new(code: :maintenance_busy) if @maintenance
+
+      @maintenance = Object.new
+      Lease.new(manager: self, token: @maintenance)
+    end
+
+    def release_maintenance(lease)
+      return false unless lease.manager.equal?(self) && @maintenance.equal?(lease.token)
+
+      @maintenance = nil
+      true
+    end
+
+    def health_check(maintenance: nil)
+      raise 'missing maintenance lease' unless maintenance&.manager.equal?(self)
+
       @health_checks += 1
       health_result
     end
 
-    def select(name)
+    def select(name, maintenance: nil)
+      raise 'missing maintenance lease' unless maintenance&.manager.equal?(self)
+
       @selections << name
       result = select_result || Result.new(code: :ok)
       @selected = name if result.success?
@@ -44,6 +65,7 @@ class UnobotV2OperationsTest < Minitest::Test
     def diagnostics
       {
         selected: selected, active_games: active ? ['machine:#uno:g1'] : [], shutdown: false,
+        maintenance: !@maintenance.nil?,
         standby: {
           'neural' => [{
             name: 'neural', health: @health, running: true, deterministic: true,
@@ -70,12 +92,28 @@ class UnobotV2OperationsTest < Minitest::Test
     end
   end
 
+  class BlockingRuntime < FakeRuntime
+    attr_reader :started, :release
+
+    def initialize
+      super
+      @started = Queue.new
+      @release = Queue.new
+    end
+
+    def transition_to(mode)
+      started << mode
+      release.pop
+      super
+    end
+  end
+
   class FakeBridge
     attr_reader :runtime
     attr_accessor :started, :joined, :worker_alive, :mode
 
-    def initialize
-      @runtime = FakeRuntime.new
+    def initialize(runtime: FakeRuntime.new)
+      @runtime = runtime
       @started = true
       @joined = ['#uno']
       @worker_alive = true
@@ -96,6 +134,52 @@ class UnobotV2OperationsTest < Minitest::Test
         }
       }
     end
+  end
+
+  class MaintenanceAgent
+    attr_reader :name
+
+    def initialize
+      @name = 'maintenance-fixture'
+    end
+
+    def start_game(*) = self
+    def decide(*) = { action: 'draw' }
+    def shutdown = self
+  end
+
+  class BlockingHealthManager < FakeManager
+    attr_reader :health_started, :health_release
+
+    def initialize(**)
+      super
+      @health_started = Queue.new
+      @health_release = Queue.new
+    end
+
+    def health_check(maintenance: nil)
+      health_started << true
+      health_release.pop
+      super
+    end
+  end
+
+  class BlockingHealthAgent < MaintenanceAgent
+    attr_reader :health_started, :health_release
+
+    def initialize
+      super
+      @health_started = Queue.new
+      @health_release = Queue.new
+    end
+
+    def health_check!
+      health_started << true
+      health_release.pop
+      self
+    end
+
+    def diagnostics = { status: :ready, running: true }
   end
 
   def setup
@@ -141,6 +225,13 @@ class UnobotV2OperationsTest < Minitest::Test
     health = operations.dispatch('command' => 'health')
     refute health[:ok]
     assert_equal :unhealthy, health[:code]
+    readiness = operations.dispatch('command' => 'ready')
+    refute readiness[:ok]
+    assert_equal :not_ready, readiness[:code]
+
+    @bridge.worker_alive = true
+    @bridge.started = false
+    refute operations.dispatch('command' => 'ready')[:ok]
   end
 
   def test_health_fails_when_ready_model_process_is_not_running
@@ -192,6 +283,45 @@ class UnobotV2OperationsTest < Minitest::Test
     assert_equal :fallback_disabled, response[:code]
   end
 
+  def test_fallback_refuses_an_active_shadow_game_before_runtime_transition
+    shadow = FakeManager.new
+    shadow.active = true
+    response = build(shadow: shadow).dispatch('command' => 'fallback')
+
+    refute response[:ok]
+    assert_equal :game_active, response[:code]
+    assert_empty @bridge.runtime.requests
+  end
+
+  def test_fallback_maintenance_closes_primary_and_shadow_activation_race
+    runtime = BlockingRuntime.new
+    @bridge = FakeBridge.new(runtime: runtime)
+    primary = strategy_manager
+    shadow = strategy_manager
+    @primary = primary
+    operations = build(shadow: shadow)
+    response = Queue.new
+    fallback = Thread.new { response << operations.dispatch('command' => 'fallback') }
+    assert_equal 'human', runtime.started.pop(timeout: 1)
+
+    [primary, shadow].each do |manager|
+      error = assert_raises(UnobotV2::Configuration::Error) { manager.decide(decision_request) }
+      assert_match(/operator maintenance/, error.message)
+      assert_empty manager.active_game_keys
+    end
+
+    runtime.release << true
+    assert fallback.join(1)
+    assert response.pop.fetch(:ok)
+    assert_equal 'draw', primary.decide(decision_request).action
+    assert_equal 'draw', shadow.decide(decision_request).action
+  ensure
+    runtime&.release&.push(true)
+    fallback&.join(1)
+    primary&.shutdown
+    shadow&.shutdown
+  end
+
   def test_select_delegates_to_manager_and_preserves_active_game_freeze
     operations = build
     assert operations.dispatch('command' => 'select', 'strategy' => 'simple')[:ok]
@@ -229,6 +359,28 @@ class UnobotV2OperationsTest < Minitest::Test
     assert_equal :restart_unavailable, build(on_restart: nil).dispatch('command' => 'restart')[:code]
   end
 
+  def test_restart_keeps_real_manager_admission_closed_until_shutdown
+    primary = strategy_manager
+    shadow = strategy_manager
+    @primary = primary
+    restarted = Queue.new
+    operations = build(shadow: shadow, on_restart: -> { restarted << true })
+
+    assert operations.dispatch('command' => 'restart')[:ok]
+    assert restarted.pop(timeout: 1)
+    [primary, shadow].each do |manager|
+      assert manager.diagnostics.fetch(:maintenance)
+      assert_raises(UnobotV2::Configuration::Error) { manager.decide(decision_request) }
+    end
+    primary.shutdown
+    shadow.shutdown
+    assert_equal :shutdown, primary.acquire_maintenance.code
+    assert_equal :shutdown, shadow.acquire_maintenance.code
+  ensure
+    primary&.shutdown
+    shadow&.shutdown
+  end
+
   def test_socket_is_owner_only_and_handles_valid_malformed_oversized_and_unknown_requests
     operations = build.start
     assert_equal 0o600, File.stat(@socket).mode & 0o777
@@ -263,13 +415,74 @@ class UnobotV2OperationsTest < Minitest::Test
     assert_raises(SecurityError) { operations.start }
   end
 
+  def test_slow_reload_does_not_delay_status_on_another_worker
+    agent = BlockingHealthAgent.new
+    @primary = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: { simple: -> { agent } }
+    )
+    operations = build(worker_count: 2).start
+    reload_response = Queue.new
+    reload_thread = Thread.new { reload_response << wire(command: 'reload') }
+    agent.health_started.pop(timeout: 1) || flunk('reload did not start')
+
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    status = wire(command: 'status')
+    assert status.fetch('ok')
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.25
+
+    agent.health_release << true
+    assert reload_thread.join(1)
+    assert reload_response.pop.fetch('ok')
+  ensure
+    agent&.health_release&.push(true)
+    reload_thread&.join(1)
+    @primary&.shutdown
+  end
+
+  def test_nonreading_client_does_not_monopolize_status_and_stop_joins_workers
+    operations = build(worker_count: 2, input_timeout: 0.2, shutdown_timeout: 1).start
+    idle = UNIXSocket.new(@socket)
+    nonreader = UNIXSocket.new(@socket)
+    nonreader.write(JSON.generate(command: 'status') << "\n")
+    sleep 0.02
+
+    assert wire(command: 'status').fetch('ok')
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    operations.stop
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1
+    assert_empty operations.instance_variable_get(:@client_workers)
+  ensure
+    idle&.close
+    nonreader&.close
+  end
+
+  def test_client_flood_is_bounded_and_refused_without_leaking_workers
+    operations = build(
+      worker_count: 2, client_capacity: 2, input_timeout: 0.15,
+      output_timeout: 0.1, shutdown_timeout: 1
+    ).start
+    clients = 12.times.map { UNIXSocket.new(@socket) }
+    sleep 0.05
+    responses = clients.filter_map do |client|
+      ready = IO.select([client], nil, nil, 0.2)
+      ready && client.gets
+    end
+    assert responses.any? { |line| JSON.parse(line).fetch('code') == 'server_busy' }
+
+    operations.stop
+    assert_operator operations.instance_variable_get(:@client_queue).length, :<=, 2
+    assert_empty operations.instance_variable_get(:@active_clients)
+  ensure
+    clients&.each { |client| client.close rescue nil }
+  end
+
   private
 
-  def build(shadow: nil, on_restart: :default)
+  def build(shadow: nil, on_restart: :default, **options)
     callback = on_restart == :default ? -> {} : on_restart
     @operations = UnobotV2::Operations.new(
       socket_path: @socket, bridge: @bridge, primary: @primary, shadow: shadow,
-      timeout: 0.5, on_restart: callback
+      timeout: 0.5, on_restart: callback, **options
     )
   end
 
@@ -283,5 +496,22 @@ class UnobotV2OperationsTest < Minitest::Test
     JSON.parse(socket.gets)
   ensure
     socket&.close
+  end
+
+  def strategy_manager
+    UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: { simple: -> { MaintenanceAgent.new } }
+    )
+  end
+
+  def decision_request
+    UnobotV2::Canonical::DecisionRequest.new(
+      your_id: 'Bot', hand: ['r5'], top_card: 'b7', game_state: 'normal',
+      stacked_cards: 0, already_picked: false, picked_card: nil,
+      other_players: [{ id: 'Human', card_count: 7 }], available_actions: ['draw'],
+      playable_cards: [], metadata: {
+        channel: '#uno', transport: 'machine', game_id: 'g1', decision_id: 'd1'
+      }
+    )
   end
 end

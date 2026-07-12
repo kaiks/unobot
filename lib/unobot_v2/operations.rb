@@ -11,12 +11,20 @@ module UnobotV2
   # returns argv, environment values, model paths, private state, or stderr.
   class Operations
     MAX_REQUEST_BYTES = 4_096
+    MAX_RESPONSE_BYTES = 65_536
     DEFAULT_TIMEOUT = 5.0
+    DEFAULT_SHUTDOWN_TIMEOUT = 30.0
+    DEFAULT_WORKERS = 4
+    DEFAULT_CLIENT_CAPACITY = 32
     COMMANDS = %w[health ready status reload fallback select restart].freeze
+    STOP = Object.new.freeze
 
     attr_reader :socket_path
 
     def initialize(socket_path:, bridge:, primary:, shadow: nil, timeout: DEFAULT_TIMEOUT,
+                   input_timeout: nil, output_timeout: nil,
+                   shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
+                   worker_count: DEFAULT_WORKERS, client_capacity: DEFAULT_CLIENT_CAPACITY,
                    on_restart: nil)
       @socket_path = File.expand_path(String(socket_path))
       raise ArgumentError, 'operations socket path must be absolute' unless String(socket_path).start_with?('/')
@@ -24,42 +32,61 @@ module UnobotV2
       @bridge = bridge
       @primary = primary
       @shadow = shadow
-      @timeout = Float(timeout)
-      raise ArgumentError, 'operations timeout must be positive' unless @timeout.positive?
+      @input_timeout = positive_timeout(input_timeout || timeout, 'input timeout')
+      @output_timeout = positive_timeout(output_timeout || timeout, 'output timeout')
+      @shutdown_timeout = positive_timeout(shutdown_timeout, 'shutdown timeout')
+      @worker_count = Integer(worker_count)
+      @client_capacity = Integer(client_capacity)
+      raise ArgumentError, 'operations worker count must be positive' unless @worker_count.positive?
+      raise ArgumentError, 'operations client capacity must be positive' unless @client_capacity.positive?
 
       @on_restart = on_restart
       @mutex = Mutex.new
       @stopping = false
       @server = nil
-      @worker = nil
+      @accept_worker = nil
+      @client_workers = []
+      @client_queue = SizedQueue.new(@client_capacity)
+      @active_clients = {}
       @started_at = monotonic_now
       @restart_requested = false
+      @restart_failed = false
+      @restart_worker = nil
+      @restart_leases = []
     end
 
     def start
       @mutex.synchronize do
-        return self if @worker&.alive?
+        return self if @accept_worker&.alive?
+        raise RuntimeError, 'operations server has been stopped' if @stopping
 
         prepare_socket!
-        @worker = Thread.new { serve }
+        @client_workers = Array.new(@worker_count) { Thread.new { consume_clients } }
+        @accept_worker = Thread.new { serve }
       end
       self
     end
 
     def stop
-      worker = @mutex.synchronize do
-        return self if @stopping && !@worker
+      accept_worker, client_workers, restart_worker, active = @mutex.synchronize do
+        return self if @stopping && !@accept_worker
 
         @stopping = true
         @server&.close
-        @worker
+        [@accept_worker, @client_workers.dup, @restart_worker, @active_clients.keys]
       end
-      worker&.join(@timeout)
-      if worker&.alive?
-        worker.kill
-        worker.join
+      active.each { |client| client.close rescue nil }
+      deadline = monotonic_now + @shutdown_timeout
+      join_bounded(accept_worker, deadline, 'accept')
+      drain_queued_clients
+      client_workers.length.times { @client_queue << STOP }
+      client_workers.each { |worker| join_bounded(worker, deadline, 'client') }
+      join_bounded(restart_worker, deadline, 'restart')
+      @mutex.synchronize do
+        @accept_worker = nil
+        @client_workers.clear
+        @restart_worker = nil
       end
-      @mutex.synchronize { @worker = nil }
       remove_socket
       self
     end
@@ -122,7 +149,10 @@ module UnobotV2
     def serve
       loop do
         client = @server.accept
-        handle(client)
+        unless enqueue_client(client)
+          write_response(client, failure(:server_busy, 'operations server is busy'), timeout: 0.1)
+          client.close rescue nil
+        end
       rescue IOError, Errno::EBADF
         break if @stopping
       rescue StandardError
@@ -132,12 +162,33 @@ module UnobotV2
       end
     end
 
+    def enqueue_client(client)
+      @client_queue.push(client, true)
+      true
+    rescue ThreadError
+      false
+    end
+
+    def consume_clients
+      loop do
+        client = @client_queue.pop
+        break if client.equal?(STOP)
+
+        begin
+          @mutex.synchronize { @active_clients[client] = true }
+          handle(client)
+        ensure
+          @mutex.synchronize { @active_clients.delete(client) }
+        end
+      end
+    end
+
     def handle(client)
       line = bounded_line(client)
       response = line ? dispatch(JSON.parse(line)) : failure(:invalid_request, 'request is missing or too large')
-      client.write(JSON.generate(response) << "\n")
+      write_response(client, response)
     rescue JSON::ParserError
-      client.write(JSON.generate(failure(:invalid_json, 'request must be one JSON object')) << "\n")
+      write_response(client, failure(:invalid_json, 'request must be one JSON object'))
     rescue StandardError
       nil
     ensure
@@ -145,7 +196,7 @@ module UnobotV2
     end
 
     def bounded_line(client)
-      deadline = monotonic_now + @timeout
+      deadline = monotonic_now + @input_timeout
       buffer = +''
       loop do
         return nil if buffer.bytesize > MAX_REQUEST_BYTES
@@ -166,10 +217,33 @@ module UnobotV2
       end
     end
 
+    def write_response(client, response, timeout: @output_timeout)
+      data = JSON.generate(response) << "\n"
+      if data.bytesize > MAX_RESPONSE_BYTES
+        data = JSON.generate(failure(:response_too_large, 'operations response exceeded its bound')) << "\n"
+      end
+      deadline = monotonic_now + timeout
+      offset = 0
+      while offset < data.bytesize
+        remaining = deadline - monotonic_now
+        return false unless remaining.positive?
+
+        ready = IO.select(nil, [client], nil, [remaining, 0.05].min)
+        next unless ready
+
+        written = client.write_nonblock(data.byteslice(offset, data.bytesize - offset), exception: false)
+        next if written == :wait_writable
+
+        offset += written
+      end
+      true
+    rescue IOError, SystemCallError
+      false
+    end
+
     def health
       payload = status_payload
-      healthy = payload.dig(:model, :health).to_s == 'ready' && payload.dig(:model, :running) &&
-                payload.dig(:bridge, :worker_alive)
+      healthy = healthy_payload?(payload)
       healthy ? success(payload) : failure(:unhealthy, 'model or bridge is not healthy', payload)
     end
 
@@ -177,25 +251,32 @@ module UnobotV2
       payload = status_payload
       channels = payload.dig(:bridge, :configured_channels) || []
       joined = payload.dig(:bridge, :joined_channels) || []
-      available = payload.dig(:model, :health).to_s == 'ready' && payload.dig(:model, :running) &&
-                  payload.dig(:bridge, :started) &&
+      available = healthy_payload?(payload) && payload.dig(:bridge, :started) &&
                   (channels - joined).empty?
       available ? success(payload) : failure(:not_ready, 'IRC session is not ready', payload)
     end
 
     def reload
-      return failure(:game_active, 'reload is disabled during a game') if manager_active?
+      with_maintenance do |leases|
+        results = managers.map do |manager|
+          manager.health_check(maintenance: lease_for(manager, leases))
+        end
+        failed = results.find(&:error?)
+        next failure(failed.code, 'strategy health check failed') if failed
 
-      results = [@primary, @shadow].compact.map(&:health_check)
-      failed = results.find(&:error?)
-      return failure(failed.code, 'strategy health check failed') if failed
-
-      success(status_payload)
+        success(status_payload)
+      end
     end
 
     def fallback
-      transition = @bridge.runtime.transition_to('human')
-      transition.success? ? success(status_payload) : failure(transition.code, 'messaging transition was refused')
+      with_maintenance do |_leases|
+        transition = @bridge.runtime.transition_to('human')
+        if transition.success?
+          success(status_payload)
+        else
+          failure(transition.code, 'messaging transition was refused')
+        end
+      end
     end
 
     def select_strategy(request)
@@ -205,12 +286,13 @@ module UnobotV2
         return failure(:model_capacity, 'live and shadow strategies cannot both own the neural model')
       end
 
-      result = @primary.select(target)
-      result.success? ? success(status_payload) : failure(result.code, 'strategy selection was refused')
+      with_maintenance do |leases|
+        result = @primary.select(target, maintenance: lease_for(@primary, leases))
+        result.success? ? success(status_payload) : failure(result.code, 'strategy selection was refused')
+      end
     end
 
     def restart
-      return failure(:game_active, 'restart is disabled during a game') if manager_active?
       return failure(:restart_unavailable, 'restart callback is not configured') unless @on_restart
 
       admitted = @mutex.synchronize do
@@ -220,17 +302,26 @@ module UnobotV2
       end
       return failure(:restart_pending, 'restart is already pending') unless admitted
 
-      Thread.new do
-        sleep 0.05
-        @on_restart.call
-      rescue StandardError
-        nil
+      leases = acquire_maintenance
+      if leases.is_a?(Hash)
+        @mutex.synchronize { @restart_requested = false }
+        return leases
       end
+      @restart_leases = leases
+      @restart_worker = Thread.new { perform_restart }
       success(restart: 'scheduled')
     end
 
-    def manager_active?
-      [@primary, @shadow].compact.any?(&:active?)
+    def perform_restart
+      sleep 0.05
+      @on_restart.call
+    rescue StandardError
+      release_maintenance(@restart_leases)
+      @mutex.synchronize do
+        @restart_failed = true
+        @restart_requested = false
+        @restart_leases = []
+      end
     end
 
     def status_payload
@@ -243,7 +334,7 @@ module UnobotV2
         messaging: @bridge.mode, live_strategy: primary[:selected],
         shadow_strategy: shadow&.dig(:selected), bridge: sanitize_bridge(bridge),
         strategy: primary, shadow: shadow, model: model,
-        restart_pending: @restart_requested
+        restart_pending: @restart_requested, restart_failed: @restart_failed
       }.compact.freeze
     end
 
@@ -266,6 +357,7 @@ module UnobotV2
     def sanitize_manager(value)
       {
         selected: value[:selected], active_games: value[:active_games], shutdown: value[:shutdown],
+        maintenance: value[:maintenance],
         standby: sanitize_instances(value[:standby]), sessions: sanitize_sessions(value[:sessions])
       }.freeze
     end
@@ -297,6 +389,69 @@ module UnobotV2
           end
       end.first
       neural || { health: :not_configured }.freeze
+    end
+
+    def healthy_payload?(payload)
+      payload.dig(:model, :health).to_s == 'ready' && payload.dig(:model, :running) &&
+        payload.dig(:bridge, :worker_alive)
+    end
+
+    def managers
+      [@primary, @shadow].compact.sort_by(&:object_id)
+    end
+
+    def acquire_maintenance
+      leases = []
+      managers.each do |manager|
+        lease = manager.acquire_maintenance
+        if lease.respond_to?(:error?) && lease.error?
+          release_maintenance(leases)
+          return failure(lease.code, 'operator maintenance was refused')
+        end
+        leases << lease
+      end
+      leases.freeze
+    end
+
+    def release_maintenance(leases)
+      Array(leases).reverse_each { |lease| lease.manager.release_maintenance(lease) }
+    end
+
+    def with_maintenance
+      leases = acquire_maintenance
+      return leases if leases.is_a?(Hash)
+
+      yield leases
+    ensure
+      release_maintenance(leases) if leases && !leases.is_a?(Hash)
+    end
+
+    def lease_for(manager, leases)
+      leases.find { |lease| lease.manager.equal?(manager) }
+    end
+
+    def drain_queued_clients
+      loop do
+        client = @client_queue.pop(true)
+        client.close rescue nil unless client.equal?(STOP)
+      rescue ThreadError
+        break
+      end
+    end
+
+    def join_bounded(worker, deadline, label)
+      return unless worker
+
+      remaining = deadline - monotonic_now
+      worker.join(remaining) if remaining.positive?
+      raise RuntimeError, "operations #{label} worker did not stop before its bounded command deadline" if worker.alive?
+    end
+
+    def positive_timeout(value, label)
+      parsed = Float(value)
+      raise ArgumentError, "operations #{label} must be positive" unless parsed.positive?
+
+      parsed
     end
 
     def success(data = nil, **values)
