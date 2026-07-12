@@ -65,6 +65,17 @@ module UnobotV2
           )
         end
 
+        if @idle[requested].empty?
+          begin
+            eager = @factories.fetch(requested).call
+            @all_instances << eager
+            @idle[requested] << eager
+          rescue StandardError => error
+            return Result.new(code: :configuration_error, message: error.message,
+                              strategy: @selected_name)
+          end
+        end
+
         @selected_name = requested
       end
       status(:selected, nil, strategy: requested)

@@ -5,14 +5,21 @@ engine protocol consumed by strategies.
 
 ## Boundaries and opt-in status
 
-The existing Cinch plugin and `UnoAI` runtime remain the default. Requiring
-`lib/unobot_v2` and constructing `UnobotV2::Runtime` opts into the v2 path.
-`UNO_RUNTIME=legacy|v2` defaults to `legacy` and is the deployment selector;
-the application must inject a canonical strategy when constructing the v2
-bridge. This stage intentionally does not select a tournament strategy.
-`UNO_MESSAGING=human|machine` selects messaging and defaults to `human`;
-invalid values fail at startup. Strategy injection is a separate constructor
-argument and is never selected by this setting.
+The existing Cinch plugin and `UnoAI` runtime remain the default.
+`UNO_RUNTIME=legacy|v2` defaults to `legacy`. The actual starter installs only
+`UnobotPlugin` in legacy mode, or only `StrategyManager` plus `CinchBridge` in
+v2 mode; the callback sets cannot be installed together.
+
+V2 has two independent selectors. `UNO_MESSAGING=human|machine` defaults to
+`human`, while `UNO_STRATEGY=legacy|simple|crushing` chooses a canonical
+strategy. `simple` and `crushing` execute the maintained Jedna tournament
+programs rather than copies in this repository. `v2 + legacy` is rejected:
+the historical `UnoAI` depends on mutable tracker history, previous/last-card
+players, turn counters, global bot identity, and a transport-writing proxy that
+cannot be reconstructed faithfully from one canonical snapshot.
+`UNO_RUNTIME=legacy` is the faithful choice and accepts only its real
+`human + legacy` combination. No selector is silently ignored. Invalid
+combinations and missing executables fail before IRC connects.
 
 There are two independent axes:
 
@@ -20,10 +27,12 @@ There are two independent axes:
   `DecisionRequest` and accepts a canonical `Action`;
 - a `Strategy` receives only that request and never IRC text.
 
-`Controller` connects the interfaces. `LegacyStrategyAdapter` is the
-compatibility boundary for canonical-state callables while the unchanged
-legacy Cinch runtime continues to use the current `UnoAI`. A future human or
-machine adapter can be swapped without changing a strategy.
+`Controller` connects the interfaces. `StrategyManager` freezes the selected
+strategy while any game is active and permits changes only after every active
+game ends. Machine sessions use channel plus authoritative `game_id`; human
+sessions use channel plus a conservative game generation that changes on a
+new game, not an ordinary status resynchronization. Multi-channel machine
+games own independent strategy/process instances.
 
 `SessionManager` owns one adapter per normalized channel and feeds every event
 through one bounded `OrderedConsumer`. Cinch callbacks should only construct a
@@ -97,8 +106,8 @@ time. The adapter deliberately has no "most recent channel" guess.
 callbacks should only translate incoming data into `Human::Event` (channel
 messages/private human replies) or `Machine::Event` (private NOTICE and
 lifecycle callbacks) and call `enqueue`. Machine registration and ACTION
-output retain the IRC-facing `uno` name. The legacy starter remains unchanged
-until the selectable strategies required by the next stage exist.
+output retain the IRC-facing `uno` name. The repository starter selects and
+attaches the complete runtime before `$bot.start`.
 
 `UnobotV2::CinchBridge` is the concrete v2 attachment. Load it with
 `require 'unobot_v2/cinch_bridge'`, construct it with the
@@ -118,16 +127,34 @@ not Cinch's private-message `target`. Human mode requires exactly one channel
 because private status and hand notices do not encode a channel. Multi-channel
 machine mode is supported, but machine-to-human fallback is rejected there.
 
-Example application selection:
+Operator examples:
 
-```ruby
-if UnobotV2::Configuration.runtime(ENV) == 'v2'
-  bridge = UnobotV2::CinchBridge.new(bot: bot, strategy: injected_strategy)
-  bridge.attach!
-else
-  # Configure the existing UnobotPlugin.
-end
+```bash
+UNO_RUNTIME=legacy bundle exec ruby uno_bot_starter.rb
+UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=simple bundle exec ruby uno_bot_starter.rb
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=simple bundle exec ruby uno_bot_starter.rb
+UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=crushing bundle exec ruby uno_bot_starter.rb
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing bundle exec ruby uno_bot_starter.rb
 ```
+
+By default, agents are discovered in a sibling `jedna` checkout under
+`extension-gems/jedna-tournaments/examples`. Set
+`UNO_TOURNAMENT_EXAMPLES=/absolute/path/to/examples` elsewhere. An individual
+agent may instead use `UNO_SIMPLE_ARGV` or `UNO_CRUSHING_ARGV`, whose value is a
+JSON array of non-empty argv strings. No shell string is accepted or
+interpolated. Useful bounds are `UNO_AGENT_STARTUP_TIMEOUT`,
+`UNO_AGENT_REQUEST_TIMEOUT`, `UNO_AGENT_SHUTDOWN_TIMEOUT`,
+`UNO_AGENT_MAX_STDOUT_LINE`, and `UNO_AGENT_STDERR_TAIL_BYTES`.
+
+The generic process strategy accepts exactly the Jedna v1 `request_action`
+object on stdin and exactly one JSON object line on stdout. Stdout is
+protocol-only; stderr is drained concurrently into bounded private tail
+storage, while public diagnostics expose only byte counts and structured
+status. Startup, request, and shutdown are bounded. Malformed, duplicate,
+noisy, oversized, late, timed-out, or invalid actions fail closed. Cancellation
+advances a generation token, terminates the process group with TERM/KILL
+escalation, and reaps it. `per_game` is the stock policy; the process layer
+also supports a `persistent` lifecycle for a future long-lived strategy.
 
 ## Machine transport and recovery
 
@@ -171,11 +198,11 @@ state. Terminal authorization/game errors (`no_game`, `not_allowlisted`,
 lifecycle state until the operator or IRC lifecycle explicitly starts a new
 registration; they do not create a registration loop.
 
-The Stage 4 bridge deliberately does not invent a second action after a
-retryable executor error. Stage 5's strategy manager must supply an explicit
-policy—resubmit a newly selected canonical action or request fresh
-registration. Silent replay and automatic duplicate strategy invocation stay
-forbidden.
+After a retryable executor error, the stock deterministic strategies cancel
+their local game process and request authoritative machine re-registration.
+They never replay the IRC action or call the strategy twice. The strategy
+boundary permits a future explicitly retry-capable strategy to supply a newly
+validated replacement action, but silent replay remains forbidden.
 
 Private NOTICE has no channel, so the machine ingress never uses a most-recent
 channel guess. Registration errors without a game ID are routed only when one

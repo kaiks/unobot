@@ -163,6 +163,21 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     end
   end
 
+  def test_strategy_change_validates_new_factory_before_publishing_selection
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new },
+        crushing: -> { raise UnobotV2::Configuration::Error, 'missing crushing executable' }
+      }
+    )
+    result = manager.select('crushing')
+    assert_equal :configuration_error, result.code
+    assert_match(/missing crushing executable/, result.message)
+    assert_equal 'simple', manager.selected_name
+  ensure
+    manager&.shutdown
+  end
+
   def test_shutdown_cancels_selection_and_closes_all_created_strategies
     strategy = RecordingStrategy.new
     manager = UnobotV2::StrategyManager.new(selected: 'simple', factories: { simple: -> { strategy } })

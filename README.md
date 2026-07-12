@@ -38,6 +38,28 @@ mkdir -p logs
 ruby uno_bot_starter.rb
 ```
 
+The unchanged legacy bot remains the default. The v2 runtime selects Jedna
+messaging and strategy independently:
+
+```bash
+# Existing UnoAI and human-text plugin
+UNO_RUNTIME=legacy bundle exec ruby uno_bot_starter.rb
+
+# Maintained Jedna Simple strategy over human text
+UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=simple \
+  bundle exec ruby uno_bot_starter.rb
+
+# Maintained Jedna Crushing strategy over the machine protocol
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing \
+  bundle exec ruby uno_bot_starter.rb
+```
+
+The v2 strategies discover a sibling `../jedna` checkout. In another layout,
+set `UNO_TOURNAMENT_EXAMPLES` to its tournament `examples` directory, or set
+`UNO_SIMPLE_ARGV` / `UNO_CRUSHING_ARGV` to a JSON argv array such as
+`["/usr/bin/ruby","/opt/jedna/examples/simple_agent.rb"]`. Operator commands
+are trusted configuration but are executed directly, never through a shell.
+
 ### Docker Deployment
 
 ```bash
@@ -58,6 +80,9 @@ Edit `bot_config.rb` to configure:
 - `CHANNELS`: IRC channels to join (default: `['#kx']`)
 - `NICK`: Bot nickname (default: `unobot`)
 - `HOST_NICKS`: Nicknames of the Uno game host bot
+
+See [`docs/unobot-v2.md`](docs/unobot-v2.md) for v2 lifecycle and process
+limits.
 
 ## Testing
 
