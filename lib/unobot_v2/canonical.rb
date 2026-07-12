@@ -147,7 +147,9 @@ module UnobotV2
 
         state = state_value.transform_keys(&:to_sym)
         new(**state, metadata: metadata)
-      rescue KeyError, TypeError, NoMethodError => error
+      rescue ValidationError
+        raise
+      rescue ArgumentError, KeyError, TypeError, NoMethodError => error
         raise ValidationError, "invalid request: #{error.message}"
       end
 
