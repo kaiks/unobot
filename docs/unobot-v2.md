@@ -24,8 +24,12 @@ machine adapter can be swapped without changing a strategy.
 through one bounded `OrderedConsumer`. Cinch callbacks should only construct a
 `Human::Event` and call `enqueue`. The reducer and strategy therefore execute
 in order and off the callback thread. Queue overflow is reported as refusal
-and triggers resynchronization. Consumer errors are isolated and delivered to
-an error callback. Stop/restart joins the old worker before replacing it.
+and triggers resynchronization on the consumer thread. Overflow advances the
+affected channel's lifecycle epoch immediately; in-flight decisions recheck
+that token before callback/action delivery, stale queued envelopes are dropped,
+and only a fresh status/private/hand boundary can restore safety. Consumer
+errors are isolated and delivered to an error callback. Stop/restart joins the
+old worker before replacing it.
 
 ## Canonical request
 
@@ -57,7 +61,11 @@ A continuously observed transcript becomes safe after player counts, the
 client's private hand, and a turn/top line are known. Plays, double markers,
 draws, normal/war passes, reverse, skip, selected wilds, and order/count changes
 are then reduced in order. After the client draws, no decision is emitted until
-the private `You draw ...` notice supplies the picked card.
+the correlated private `You draw ...` notice supplies the picked card. Public
+single draws, private picked-card notices, and private multi-card war penalties
+have separate expected transitions; duplicates, missing counterparts, count
+mismatches, and out-of-turn draws force resynchronization rather than changing
+the hand twice.
 
 Any detected gap or contradiction makes the state unsafe. The adapter sends
 `us` and `ca`, refuses actions, and becomes safe only after a coherent
