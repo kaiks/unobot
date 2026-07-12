@@ -171,6 +171,12 @@ state. Terminal authorization/game errors (`no_game`, `not_allowlisted`,
 lifecycle state until the operator or IRC lifecycle explicitly starts a new
 registration; they do not create a registration loop.
 
+The Stage 4 bridge deliberately does not invent a second action after a
+retryable executor error. Stage 5's strategy manager must supply an explicit
+policy—resubmit a newly selected canonical action or request fresh
+registration. Silent replay and automatic duplicate strategy invocation stay
+forbidden.
+
 Private NOTICE has no channel, so the machine ingress never uses a most-recent
 channel guess. Registration errors without a game ID are routed only when one
 registration is pending. Multiple pending registrations make such a frame
