@@ -68,6 +68,7 @@ class UnobotV2MachineProtocolTest < Minitest::Test
       invalid_game_id: 'UNO_MACHINE_V1 ACK game=bad! decision=d status=ok action=draw',
       invalid_action_type: 'UNO_MACHINE_V1 ACK game=g decision=d status=ok action=nope',
       chunk_too_large: "UNO_MACHINE_V1 STATE game=g decision=d part=1/1 data=#{'a' * 129}",
+      invalid_part: 'UNO_MACHINE_V1 STATE game=g decision=d part=1/1000 data=a',
       wire_too_large: "UNO_MACHINE_V1 ERROR game=g decision=d code=#{'a' * 380} retry=0"
     }
     cases.each do |code, line|
@@ -149,6 +150,21 @@ class UnobotV2MachineProtocolTest < Minitest::Test
 
     tiny = UnobotV2::Machine::FrameBuffer.new(max_encoded_bytes: 1)
     assert_equal :frame_evicted, tiny.accept(one).error.code
+  end
+
+  def test_incomplete_frames_for_multiple_games_and_decisions_are_isolated
+    buffer = UnobotV2::Machine::FrameBuffer.new
+    original = @fixture.fetch('state_lines').first
+    lines = [
+      original,
+      original.sub('decision=decisionFixture1', 'decision=decisionFixture2'),
+      original.sub('game=gameFixture1', 'game=gameFixture2')
+    ]
+    lines.each do |line|
+      assert_equal :pending, buffer.accept(UnobotV2::Machine::Protocol.parse(line).value).status
+    end
+    assert_equal 3, buffer.frames.length
+    assert_equal 3, buffer.frames.keys.uniq.length
   end
 
   def test_invalid_base64_and_decompressed_size_are_bounded
@@ -467,6 +483,43 @@ class UnobotV2MachineIngressTest < Minitest::Test
     ingress.stop
   end
 
+  def test_queue_overflow_during_reassembly_discards_every_partial_frame
+    started = Queue.new
+    release = Queue.new
+    uno = adapter('#uno')
+    uno.define_singleton_method(:receive) do |input|
+      if input.is_a?(UnobotV2::Machine::Protocol::Message) && input.kind == :ack
+        started << true
+        release.pop
+      end
+      super(input)
+    end
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: ['Host'],
+      queue_capacity: 1, on_error: ->(error) { @errors << error }
+    ).start
+    @sent.pop
+    ingress.enqueue(notice(@fixture.fetch('registered_line')))
+    wait_until { uno.game_id }
+    first, second, third = @fixture.fetch('state_lines')
+    ingress.enqueue(notice(first))
+    wait_until { uno.frame_buffer.frames.values.first&.parts&.length == 1 }
+    ingress.enqueue(notice(@fixture.fetch('ack_line')))
+    started.pop
+    assert ingress.enqueue(notice(second))
+    refute ingress.enqueue(notice(third))
+    release << true
+    codes = []
+    wait_until do
+      codes << @errors.pop.code until @errors.empty?
+      codes.include?(:queue_overflow)
+    end
+    assert_includes codes, :queue_overflow
+    assert_empty uno.frame_buffer.frames
+    assert_equal :registering, uno.lifecycle
+    ingress.stop
+  end
+
   def test_disconnect_reconnect_and_nick_lifecycle_are_ordered
     uno = adapter('#uno')
     ingress = UnobotV2::Machine::Ingress.new(
@@ -486,6 +539,18 @@ class UnobotV2MachineIngressTest < Minitest::Test
     assert_equal '.uno machine register', @sent.pop[1]
     assert_equal 'Alice2', uno.own_nick
     ingress.stop
+  end
+
+
+  private
+
+  def wait_until(timeout: 1)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    until yield
+      raise 'timed out' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+      Thread.pass
+    end
   end
 end
 

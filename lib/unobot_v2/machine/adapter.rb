@@ -198,7 +198,8 @@ module UnobotV2
         reason = payload.fetch('reason')
         return failure(:invalid_decision_id) unless Protocol.token?(decision_id, allow_dash: false)
         return failure(:invalid_reason) unless REASONS.include?(reason)
-        return success if @seen_decisions.include?(decision_id)
+        decision_key = [game_id, decision_id]
+        return success if @seen_decisions.include?(decision_key)
 
         request = Canonical::DecisionRequest.from_protocol(
           payload.fetch('request'),
@@ -208,7 +209,7 @@ module UnobotV2
             lifecycle: lifecycle.to_s
           }
         )
-        remember_decision(decision_id)
+        remember_decision(decision_key)
         @active_request = request
         @submitted_decision_id = nil
         @active_lifecycle_token = @lifecycle_token
@@ -310,8 +311,8 @@ module UnobotV2
         @active_lifecycle_token = nil
       end
 
-      def remember_decision(decision_id)
-        @seen_decisions << decision_id
+      def remember_decision(decision_key)
+        @seen_decisions << decision_key.freeze
         @seen_decisions.shift while @seen_decisions.length > HISTORY_LIMIT
       end
 
