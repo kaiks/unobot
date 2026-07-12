@@ -168,6 +168,23 @@ strategy.
 
 ## Neural strategy
 
+Before allowing neural actions onto IRC, run another strategy live and set
+`UNO_SHADOW_STRATEGY=neural`. The neural manager is health-checked before IRC
+attachment and then receives every immutable canonical decision on a separate
+bounded worker. Its validated action and whether it agrees with the live action
+are emitted as one `[unobot shadow]` JSON object on stderr. Shadow output is
+never submitted to either messaging adapter; a slow, crashed, or saturated
+shadow reports an error/drop and cannot delay or replace the live action.
+Redirect stderr to retain the rollout artifact. `none` (the default), `simple`,
+and `crushing` are also accepted for differential checks.
+
+```bash
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=simple \
+  UNO_SHADOW_STRATEGY=neural \
+  UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip \
+  bundle exec ruby uno_bot_starter.rb 2>shadow.jsonl
+```
+
 `UNO_STRATEGY=neural` runs the maintained persistent module
 `python3 -m rl_agent.sb3_opponent --model CHECKPOINT` with no shell
 interpolation. `UNO_TOURNAMENT_EXAMPLES` is a validated working directory and

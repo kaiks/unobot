@@ -15,6 +15,7 @@ class UnobotApplicationTest < Minitest::Test
       runtime: UNOBOT_RUNTIME,
       bridge: !!$unobot_v2_bridge,
       strategy: $unobot_strategy_manager&.selected_name,
+      shadow: $unobot_shadow_manager&.selected_name,
       plugins: $bot.config.plugins.plugins.map(&:name)
     )
     $unobot_v2_bridge&.stop
@@ -63,6 +64,26 @@ class UnobotApplicationTest < Minitest::Test
     end
   end
 
+  def test_v2_health_checks_neural_shadow_without_selecting_it_for_live_actions
+    Dir.mktmpdir('unobot-checkpoint') do |directory|
+      checkpoint = File.join(directory, 'checkpoint_17500000_steps.zip')
+      File.write(checkpoint, 'fixture')
+      result = probe(
+        'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'machine', 'UNO_STRATEGY' => 'simple',
+        'UNO_SHADOW_STRATEGY' => 'neural',
+        'UNO_SIMPLE_ARGV' => JSON.generate([
+          RbConfig.ruby, File.join(ROOT, 'test/fixtures/process_agents/protocol_agent.rb')
+        ]),
+        'UNO_TOURNAMENT_EXAMPLES' => File.join(ROOT, 'test/fixtures/neural_examples'),
+        'UNO_NEURAL_CHECKPOINT' => checkpoint,
+        'UNO_NEURAL_PYTHON' => File.join(ROOT, 'test/fixtures/process_agents/fake_python.rb')
+      )
+      assert result[:status].success?, result[:stderr]
+      assert_equal 'simple', result[:json].fetch('strategy')
+      assert_equal 'neural', result[:json].fetch('shadow')
+    end
+  end
+
   def test_v2_rejects_failed_neural_startup_health_before_bridge_attachment
     Dir.mktmpdir('unobot-checkpoint') do |directory|
       checkpoint = File.join(directory, 'checkpoint_17500000_steps.zip')
@@ -99,7 +120,8 @@ class UnobotApplicationTest < Minitest::Test
       'UNO_RUNTIME' => nil, 'UNO_MESSAGING' => nil, 'UNO_STRATEGY' => nil,
       'UNO_TOURNAMENT_EXAMPLES' => nil, 'UNO_SIMPLE_ARGV' => nil,
       'UNO_CRUSHING_ARGV' => nil, 'UNO_NEURAL_CHECKPOINT' => nil,
-      'UNO_NEURAL_PYTHON' => nil, 'UNO_NEURAL_STOCHASTIC' => nil
+      'UNO_NEURAL_PYTHON' => nil, 'UNO_NEURAL_STOCHASTIC' => nil,
+      'UNO_SHADOW_STRATEGY' => nil
     }
     stdout, stderr, status = Open3.capture3(
       clean.merge(environment), RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', PROBE,

@@ -2,6 +2,7 @@
 # cinch
 
 require 'cinch'
+require 'json'
 require 'thread'
 require_relative '../bot_config.rb'
 require_relative 'unobot_v2/configuration'
@@ -52,8 +53,21 @@ $bot.loggers[1].level = :error
 
 if UNOBOT_RUNTIME == 'v2'
   $unobot_strategy_manager = UnobotV2::StrategyManager.from_env(env: ENV)
+  shadow_name = UnobotV2::Configuration.shadow_strategy(ENV)
+  if shadow_name
+    shadow_env = ENV.to_h.merge('UNO_STRATEGY' => shadow_name)
+    $unobot_shadow_manager = UnobotV2::StrategyManager.from_env(env: shadow_env)
+    $unobot_strategy = UnobotV2::ShadowStrategy.new(
+      primary: $unobot_strategy_manager, shadow: $unobot_shadow_manager,
+      on_observation: lambda do |observation|
+        warn "[unobot shadow] #{JSON.generate(observation.to_h)}"
+      end
+    )
+  else
+    $unobot_strategy = $unobot_strategy_manager
+  end
   $unobot_v2_bridge = UnobotV2::CinchBridge.new(
-    bot: $bot, strategy: $unobot_strategy_manager, env: ENV
+    bot: $bot, strategy: $unobot_strategy, env: ENV
   ).attach!
   at_exit { $unobot_v2_bridge&.stop }
 end

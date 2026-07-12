@@ -29,6 +29,14 @@ module UnobotV2
       raise Error, "invalid UNO_STRATEGY #{value.inspect}; expected legacy, simple, crushing, or neural"
     end
 
+    def shadow_strategy(env = ENV)
+      value = env.fetch('UNO_SHADOW_STRATEGY', '').to_s.downcase
+      return nil if value.empty? || value == 'none'
+      return value if STRATEGIES.include?(value) && value != 'legacy'
+
+      raise Error, "invalid UNO_SHADOW_STRATEGY #{value.inspect}; expected none, simple, crushing, or neural"
+    end
+
     def fallback_enabled?(env = ENV)
       boolean(env.fetch('UNO_MACHINE_HUMAN_FALLBACK', 'false'), 'UNO_MACHINE_HUMAN_FALLBACK')
     end
