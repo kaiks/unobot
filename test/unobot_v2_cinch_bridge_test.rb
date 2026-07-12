@@ -63,13 +63,13 @@ class UnobotV2CinchBridgeTest < Minitest::Test
   end
 
   class Bot
-    Config = Struct.new(:channels, :host_nicks, keyword_init: true)
+    Config = Struct.new(:channels, :host_nicks, :nick, keyword_init: true)
 
     attr_reader :nick, :config, :handlers, :channel_targets, :user_targets, :loggers
 
     def initialize(nick: 'Alice', channels: ['#uno'], host_nicks: ['Host'])
       @nick = nick
-      @config = Config.new(channels: channels, host_nicks: host_nicks)
+      @config = Config.new(channels: channels, host_nicks: host_nicks, nick: nick)
       @handlers = Handlers.new
       @channel_targets = Hash.new { |hash, key| hash[key.downcase] = Target.new }
       @user_targets = Hash.new { |hash, key| hash[key.downcase] = Target.new }
@@ -147,6 +147,19 @@ class UnobotV2CinchBridgeTest < Minitest::Test
     assert_includes action[0], 'UNO_MACHINE_V1 ACTION '
     refute_same @callback_thread, action[1]
     assert @bot.channel_targets['host'].messages.empty?
+  end
+
+  def test_preconnection_bridge_uses_configured_nick_when_live_nick_is_empty
+    bot = Bot.new(nick: 'ConfiguredBot')
+    bot.instance_variable_set(:@nick, nil)
+    @bridge = UnobotV2::CinchBridge.new(
+      bot: bot, strategy: @strategy, env: { 'UNO_MESSAGING' => 'machine' },
+      tick_interval: 0.01
+    ).attach!
+
+    @bridge.on_join(fake_message(command: 'JOIN', source: 'ConfiguredBot', channel: '#uno'))
+
+    assert_equal '.uno machine register', pop(bot.channel_targets['#uno'].messages)[0]
   end
 
   def test_human_private_notice_uses_params_recipient_and_never_callback_thread

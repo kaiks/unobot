@@ -42,7 +42,9 @@ module UnobotV2
       @env = env
       configured_mode = Configuration.messaging(env)
       @channels = Array(channels || bot.config.channels).map { |value| value.to_s.downcase }.uniq.freeze
-      @own_nick = (own_nick || bot.nick).to_s
+      @own_nick = [own_nick, bot.nick, bot.config.respond_to?(:nick) ? bot.config.nick : nil]
+                  .find { |value| !value.to_s.empty? }.to_s
+      raise Configuration::Error, 'IRC nick must be configured before attaching the v2 bridge' if @own_nick.empty?
       @host_nicks = Array(host_nicks || bot.config.host_nicks).map(&:to_s).freeze
       @autojoin = Configuration.autojoin_enabled?(env)
       fallback = Configuration.fallback_enabled?(env)
