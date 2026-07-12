@@ -47,18 +47,34 @@ class UnobotApplicationTest < Minitest::Test
     assert_match(/crushing_agent\.rb/, result[:stderr])
   end
 
-  def test_v2_accepts_neural_strategy_configuration_without_spawning_the_model
+  def test_v2_health_checks_neural_strategy_before_bridge_attachment
     Dir.mktmpdir('unobot-checkpoint') do |directory|
       checkpoint = File.join(directory, 'checkpoint_17500000_steps.zip')
       File.write(checkpoint, 'fixture')
       result = probe(
         'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'machine', 'UNO_STRATEGY' => 'neural',
         'UNO_TOURNAMENT_EXAMPLES' => File.join(ROOT, 'test/fixtures/neural_examples'),
-        'UNO_NEURAL_CHECKPOINT' => checkpoint, 'UNO_NEURAL_PYTHON' => '/bin/true'
+        'UNO_NEURAL_CHECKPOINT' => checkpoint,
+        'UNO_NEURAL_PYTHON' => File.join(ROOT, 'test/fixtures/process_agents/fake_python.rb')
       )
       assert result[:status].success?, result[:stderr]
       assert_equal 'neural', result[:json].fetch('strategy')
       assert_equal true, result[:json].fetch('bridge')
+    end
+  end
+
+  def test_v2_rejects_failed_neural_startup_health_before_bridge_attachment
+    Dir.mktmpdir('unobot-checkpoint') do |directory|
+      checkpoint = File.join(directory, 'checkpoint_17500000_steps.zip')
+      File.write(checkpoint, 'fixture')
+      result = probe(
+        'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'machine', 'UNO_STRATEGY' => 'neural',
+        'UNO_TOURNAMENT_EXAMPLES' => File.join(ROOT, 'test/fixtures/neural_examples'),
+        'UNO_NEURAL_CHECKPOINT' => checkpoint, 'UNO_NEURAL_PYTHON' => '/bin/false'
+      )
+      refute result[:status].success?
+      assert_nil result[:json]
+      assert_match(/neural startup health check failed/, result[:stderr])
     end
   end
 

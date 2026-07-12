@@ -20,6 +20,7 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     end
 
     def running? = false
+    def process_generation = 0
     def shutdown = nil
     def diagnostics = { name: name, running: false }
   end
@@ -42,7 +43,7 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     )
   end
 
-  def neural(mode, clock: nil, **options)
+  def neural(mode, clock: nil, start: true, **options)
     process = UnobotV2::ProcessAgent.new(
       argv: [RbConfig.ruby, PROCESS_FIXTURE, mode], name: 'neural',
       lifecycle: :persistent, request_timeout: 1, shutdown_timeout: 0.1
@@ -55,8 +56,37 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     UnobotV2::NeuralAgent.new(**values).tap do |agent|
       @agents ||= []
       @agents << agent
-      agent.start_game('g1')
+      agent.start_game('g1') if start
     end
+  end
+
+  def test_startup_health_check_validates_and_retains_the_warm_idle_process
+    agent = neural('persistent_valid', start: false)
+    agent.startup_health_check!
+    process = agent.instance_variable_get(:@process)
+    pid = process.instance_variable_get(:@wait_thread).pid
+    assert_equal :ready, agent.diagnostics[:health]
+    assert_equal false, agent.diagnostics[:game_active]
+
+    agent.start_game('live')
+    assert_equal pid, process.instance_variable_get(:@wait_thread).pid
+    assert_equal 'draw', agent.decide(request).action
+  end
+
+  def test_idle_process_death_marks_replacement_cold_instead_of_reusing_warm_deadline
+    agent = neural('persistent_exit_slow')
+    assert_equal 'draw', agent.decide(request).action
+    process = agent.instance_variable_get(:@process)
+    first_pid = process.instance_variable_get(:@wait_thread).pid
+    agent.end_game('g1', reason: 'idle death fixture')
+    sleep 0.01 while agent.diagnostics[:running]
+
+    agent.start_game('g2')
+    refute_equal first_pid, process.instance_variable_get(:@wait_thread).pid
+    assert_equal :loading, agent.diagnostics[:health]
+    # The fixture needs 100ms. This succeeds only with the 500ms cold deadline;
+    # retaining the 50ms warm deadline deterministically times out.
+    assert_equal 'draw', agent.decide(request).action
   end
 
   def test_process_stays_warm_across_games_and_health_becomes_ready
@@ -96,6 +126,65 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     assert_raises(UnobotV2::ProcessAgent::Error) { agent.decide(request) }
     assert_equal 2, agent.diagnostics[:consecutive_failures]
     assert_in_delta 2.0, agent.diagnostics[:retry_in_seconds], 0.001
+  end
+
+  def test_concurrent_decisions_admit_only_one_failure_before_backoff
+    agent = neural('eof')
+    process = agent.instance_variable_get(:@process)
+    initial_process_generation = process.process_generation
+    gate = Queue.new
+    outcomes = Queue.new
+    threads = 2.times.map do
+      Thread.new do
+        gate.pop
+        agent.decide(request)
+        outcomes << :action
+      rescue UnobotV2::ProcessAgent::Error => error
+        outcomes << error.code
+      end
+    end
+    2.times { gate << true }
+    threads.each { |thread| assert thread.join(2) }
+
+    assert_equal %i[process_eof restart_backoff], 2.times.map { outcomes.pop }.sort
+    assert_equal 1, agent.diagnostics[:consecutive_failures]
+    assert_equal initial_process_generation, process.process_generation
+    refute agent.diagnostics[:running]
+  end
+
+  def test_queued_decisions_stay_clean_when_lifecycle_cancels_the_game
+    %i[cancel end_game].each do |operation|
+      agent = neural('timeout', cold_timeout: 10, warm_timeout: 10)
+      process = agent.instance_variable_get(:@process)
+      process_generation = process.process_generation
+      gate = Queue.new
+      outcomes = Queue.new
+      threads = 2.times.map do
+        Thread.new do
+          gate.pop
+          agent.decide(request)
+          outcomes << :action
+        rescue UnobotV2::ProcessAgent::Error => error
+          outcomes << error.code
+        end
+      end
+      2.times { gate << true }
+      sleep 0.005 until process.diagnostics[:generation] >= 2
+      if operation == :cancel
+        agent.cancel(reason: 'concurrent lifecycle test')
+      else
+        agent.end_game('g1', reason: 'concurrent lifecycle test')
+      end
+      threads.each { |thread| assert thread.join(2), operation }
+
+      results = 2.times.map { outcomes.pop }
+      refute_includes results, :action, operation
+      assert_includes results, :no_game, operation
+      assert_equal 0, agent.diagnostics[:consecutive_failures], operation
+      assert_equal :unverified, agent.diagnostics[:health], operation
+      assert_equal process_generation, process.process_generation, operation
+      refute agent.diagnostics[:running], operation
+    end
   end
 
   def test_spawn_failure_backoff_is_enforced_before_another_spawn_attempt

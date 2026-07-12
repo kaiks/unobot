@@ -159,6 +159,22 @@ class UnobotV2ProcessAgentTest < Minitest::Test
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1
   end
 
+  def test_replacement_spawn_can_upgrade_a_racing_warm_deadline_to_cold
+    strategy = agent('exit_slow_response', request_timeout: 1)
+    first_generation = strategy.process_generation
+    assert_equal 'draw', strategy.decide(request, timeout: 0.5).action
+    sleep 0.01 while strategy.running?
+
+    # A neural caller can observe the old generation as warm immediately
+    # before ProcessAgent serializes and respawns. The generation change makes
+    # this request use the cold deadline rather than the stale warm one.
+    assert_equal 'draw', strategy.decide(
+      request, timeout: 0.05, cold_timeout: 0.5,
+      expected_process_generation: first_generation
+    ).action
+    assert_operator strategy.process_generation, :>, first_generation
+  end
+
   def test_concurrent_decision_and_game_end_never_leave_a_child_or_late_action
     10.times do |index|
       strategy = agent('timeout', request_timeout: 2.0)

@@ -36,8 +36,9 @@ module UnobotV2
       @selected_name = normalize(selected)
       validate_supported!(@selected_name)
       # Validate the selected executable/script before IRC can connect. This
-      # constructs no child process; ProcessAgent spawning remains game-lazy.
-      eager = @factories.fetch(@selected_name).call
+      # keeps stock processes game-lazy. Neural additionally performs its
+      # model-load inference health check before IRC bridge attachment.
+      eager = prepare_strategy(@selected_name)
       @all_instances << eager
       @idle[@selected_name] << eager
     end
@@ -69,7 +70,7 @@ module UnobotV2
 
         if @idle[requested].empty?
           begin
-            eager = @factories.fetch(requested).call
+            eager = prepare_strategy(requested)
             @all_instances << eager
             @idle[requested] << eager
           rescue StandardError => error
@@ -156,6 +157,15 @@ module UnobotV2
     def active? = @mutex.synchronize { !@sessions.empty? }
 
     private
+
+    def prepare_strategy(name)
+      strategy = @factories.fetch(name).call
+      strategy.startup_health_check! if strategy.respond_to?(:startup_health_check!)
+      strategy
+    rescue StandardError => error
+      strategy&.shutdown if strategy&.respond_to?(:shutdown)
+      raise Configuration::Error, "#{name} startup health check failed: #{error.message}"
+    end
 
     def activate(key, scope, request)
       replaced = nil

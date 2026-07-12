@@ -9,6 +9,7 @@ module UnobotV2
   # retry backoff. The upstream protocol has no ready frame, so the first valid
   # request after a spawn is the only truthful model-load health check.
   class NeuralAgent
+    HEALTH_GAME_KEY = '__unobot_neural_startup_health__'
     DEFAULT_COLD_TIMEOUT = 15.0
     DEFAULT_WARM_TIMEOUT = 1.0
     DEFAULT_BACKOFF_INITIAL = 1.0
@@ -34,6 +35,7 @@ module UnobotV2
       @clock = clock
       @stochastic = stochastic
       @mutex = Mutex.new
+      @decision_mutex = Mutex.new
       @health = :unverified
       @consecutive_failures = 0
       @next_retry_at = nil
@@ -46,8 +48,13 @@ module UnobotV2
 
     def start_game(game_key)
       @mutex.synchronize { enforce_backoff! }
+      prior_process_generation = @process.process_generation
       @process.start_game(game_key)
-      @mutex.synchronize { @health = :loading unless @process.running? && @health == :ready }
+      current_process_generation = @process.process_generation
+      @mutex.synchronize do
+        @health = :loading unless @process.running? && @health == :ready &&
+                                  current_process_generation == prior_process_generation
+      end
       self
     rescue ProcessAgent::Error => error
       record_failure(error) unless error.code == :restart_backoff
@@ -55,34 +62,68 @@ module UnobotV2
     end
 
     def decide(request)
-      validate_request!(request)
-      timeout = @mutex.synchronize do
-        enforce_backoff!
-        @health == :ready && @process.running? ? @warm_timeout : @cold_timeout
+      @decision_mutex.synchronize do
+        begin
+          validate_request!(request)
+          timeout, expected_process_generation = @mutex.synchronize do
+            enforce_backoff!
+            if @health == :ready && @process.running?
+              [@warm_timeout, @process.process_generation]
+            else
+              [@cold_timeout, nil]
+            end
+          end
+          action = @process.decide(
+            request, timeout: timeout, cold_timeout: @cold_timeout,
+            expected_process_generation: expected_process_generation
+          )
+          @mutex.synchronize do
+            @health = :ready
+            @consecutive_failures = 0
+            @next_retry_at = nil
+            @current_backoff = nil
+            @last_failure = nil
+          end
+          action
+        rescue ProcessAgent::Error, Canonical::ValidationError => error
+          code = error.code if error.respond_to?(:code)
+          if %i[cancelled shutdown no_game].include?(code)
+            @mutex.synchronize { @health = :unverified unless @process.running? }
+          elsif !%i[restart_backoff unsupported_topology].include?(code)
+            record_failure(error)
+          end
+          raise
+        rescue StandardError => error
+          record_failure(error)
+          raise
+        end
       end
-      action = @process.decide(request, timeout: timeout)
-      @mutex.synchronize do
-        @health = :ready
-        @consecutive_failures = 0
-        @next_retry_at = nil
-        @current_backoff = nil
-        @last_failure = nil
-      end
-      action
-    rescue ProcessAgent::Error, Canonical::ValidationError => error
-      unless error.respond_to?(:code) &&
-             %i[restart_backoff unsupported_topology cancelled shutdown].include?(error.code)
-        record_failure(error)
-      end
-      raise
-    rescue StandardError => error
-      record_failure(error)
-      raise
     end
 
     def validate_request!(request)
       validate_topology!(request)
       true
+    end
+
+    # The upstream feed-forward policy has no ready frame and no per-game
+    # memory. One reserved canonical decision is therefore the model-load
+    # health check; game_end resets the protocol boundary while retaining the
+    # verified warm process for the first live game.
+    def startup_health_check!
+      return self if @mutex.synchronize { @health == :ready } && @process.running?
+
+      start_game(HEALTH_GAME_KEY)
+      decide(startup_health_request)
+      end_game(HEALTH_GAME_KEY, reason: 'startup_health_checked')
+      unless @process.running? && @mutex.synchronize { @health == :ready }
+        raise ProcessAgent::Error.new(
+          :health_check_failed, 'neural process did not remain healthy after startup reset'
+        )
+      end
+      self
+    rescue StandardError
+      @process.cancel(reason: 'startup_health_check_failed')
+      raise
     end
 
     def end_game(game_key = nil, reason: 'game_end')
@@ -124,6 +165,20 @@ module UnobotV2
       raise ProcessAgent::Error.new(
         :unsupported_topology,
         'neural strategy supports exactly one opponent (one human plus this bot)'
+      )
+    end
+
+    def startup_health_request
+      Canonical::DecisionRequest.new(
+        your_id: 'unobot-neural-health', hand: ['r5'], top_card: 'b7',
+        game_state: 'normal', stacked_cards: 0, already_picked: false,
+        picked_card: nil,
+        other_players: [{ id: 'human-health-opponent', card_count: 7 }],
+        available_actions: ['draw'], playable_cards: [],
+        metadata: {
+          channel: '#unobot-health', transport: 'machine',
+          game_id: HEALTH_GAME_KEY, decision_id: 'startup-health-decision'
+        }
       )
     end
 

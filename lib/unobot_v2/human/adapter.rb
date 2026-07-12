@@ -60,6 +60,7 @@ module UnobotV2
           @callback_errors << error
           @last_error = :strategy_error
           if token_valid?(@active_lifecycle_token)
+            safe_lifecycle(:cancel, @active_request, 'strategy_error')
             resync!('strategy_error')
           else
             reducer.invalidate!('strategy_error_after_invalidation')

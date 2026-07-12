@@ -56,6 +56,7 @@ module UnobotV2
       @lifecycle_mutex = Mutex.new
       @stderr_mutex = Mutex.new
       @generation = 0
+      @process_generation = 0
       @stderr_tail = +''
       @stderr_bytes = 0
       @stdout_buffer = +''
@@ -84,7 +85,7 @@ module UnobotV2
       self
     end
 
-    def decide(request, timeout: nil)
+    def decide(request, timeout: nil, cold_timeout: nil, expected_process_generation: nil)
       @request_mutex.synchronize do
         token = @state_mutex.synchronize do
           raise Error.new(:shutdown, 'agent has been shut down') if @closed
@@ -93,7 +94,11 @@ module UnobotV2
           @generation += 1
         end
         start_process(expected_generation: token) unless running?
-        deadline = now + (timeout ? positive_float(timeout, 'request timeout') : @request_timeout)
+        selected_timeout = timeout ? positive_float(timeout, 'request timeout') : @request_timeout
+        if expected_process_generation && process_generation != expected_process_generation
+          selected_timeout = positive_float(cold_timeout, 'cold request timeout')
+        end
+        deadline = now + selected_timeout
         reject_pending_stdout!
         write_request(request, token, deadline: deadline)
         raw = read_response(token, deadline: deadline)
@@ -159,6 +164,8 @@ module UnobotV2
       @state_mutex.synchronize { !!@wait_thread&.alive? }
     end
 
+    def process_generation = @state_mutex.synchronize { @process_generation }
+
     def retry_capable? = false
 
     # Deliberately excludes argv, environment, and stderr contents.
@@ -167,7 +174,8 @@ module UnobotV2
         {
           name: name, lifecycle: lifecycle, status: @status,
           running: !!@wait_thread&.alive?, game_active: !@game_key.nil?,
-          generation: @generation, last_error: @last_error,
+          generation: @generation, process_generation: @process_generation,
+          last_error: @last_error,
           stderr_bytes: @stderr_mutex.synchronize { @stderr_bytes },
           stderr_tail_bytes: @stderr_mutex.synchronize { @stderr_tail.bytesize }
         }.freeze
@@ -262,6 +270,7 @@ module UnobotV2
               (@generation != expected_generation || @game_key.nil?))
             unless invalid
               @stdin, @stdout, @stderr, @wait_thread = stdin, stdout, stderr, wait_thread
+              @process_generation += 1
               @stdout_buffer = +''
               @status = :running
             end

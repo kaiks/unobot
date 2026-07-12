@@ -18,37 +18,43 @@ class UnobotV2NeuralRealTest < Minitest::Test
   end
 
   def test_real_checkpoint_cold_warm_and_game_reset_reuse
-    agent = UnobotV2::StrategyFactory.build(
-      'neural', env: {
+    health_started = monotonic
+    manager = UnobotV2::StrategyManager.from_env(
+      env: {
+        'UNO_STRATEGY' => 'neural',
         'UNO_TOURNAMENT_EXAMPLES' => examples,
         'UNO_NEURAL_CHECKPOINT' => checkpoint,
         'UNO_NEURAL_COLD_TIMEOUT' => '20', 'UNO_NEURAL_WARM_TIMEOUT' => '2'
       }
     )
+    cold_health = monotonic - health_started
+    agent = manager.instance_variable_get(:@idle).fetch('neural').last
     request = two_player_request
-    agent.start_game('real-one')
     process = agent.instance_variable_get(:@process)
     pid = process.instance_variable_get(:@wait_thread).pid
+    assert_equal :ready, agent.diagnostics[:health]
+    assert_equal false, agent.diagnostics[:game_active]
+    assert_operator cold_health, :<, 20
 
-    cold_started = monotonic
-    first = agent.decide(request)
-    cold = monotonic - cold_started
     warm_started = monotonic
-    second = agent.decide(request)
-    warm = monotonic - warm_started
+    first = manager.decide(request)
+    first_warm = monotonic - warm_started
+    warm_started = monotonic
+    second = manager.decide(request)
+    second_warm = monotonic - warm_started
     UnobotV2::ActionValidator.validate(first, request: request)
     UnobotV2::ActionValidator.validate(second, request: request)
     assert_equal first, second
-    assert_operator cold, :<, 20
-    assert_operator warm, :<, 2
+    assert_operator first_warm, :<, 2
+    assert_operator second_warm, :<, 2
     assert_equal :ready, agent.diagnostics[:health]
 
-    agent.end_game('real-one', reason: 'smoke_reset')
-    agent.start_game('real-two')
+    assert_predicate manager.game_end('machine:#uno:real', reason: 'smoke_reset'), :success?
+    next_request = two_player_request(game: 'real-two')
+    assert manager.decide(next_request)
     assert_equal pid, process.instance_variable_get(:@wait_thread).pid
-    assert agent.decide(request)
   ensure
-    agent&.shutdown
+    manager&.shutdown
   end
 
   private
@@ -56,14 +62,14 @@ class UnobotV2NeuralRealTest < Minitest::Test
   def examples = ENV.fetch('UNO_TOURNAMENT_EXAMPLES', DEFAULT_EXAMPLES)
   def checkpoint = ENV.fetch('UNO_NEURAL_CHECKPOINT', DEFAULT_CHECKPOINT)
 
-  def two_player_request
+  def two_player_request(game: 'real')
     envelope = JSON.parse(File.read(File.expand_path(
       'fixtures/jedna_protocol_v1/request_action_normal.json', __dir__
     )))
     envelope.fetch('state')['other_players'] = [envelope.fetch('state').fetch('other_players').first]
     UnobotV2::Canonical::DecisionRequest.from_protocol(
       envelope, metadata: {
-        channel: '#uno', transport: 'machine', game_id: 'real', decision_id: 'real-decision'
+        channel: '#uno', transport: 'machine', game_id: game, decision_id: "#{game}-decision"
       }
     )
   end

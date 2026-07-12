@@ -10,7 +10,7 @@ sleep 10 if mode == 'non_reading'
 while (line = $stdin.gets)
   request = JSON.parse(line)
   if request['type'] == 'game_end'
-    next if %w[persistent_valid persistent_slow].include?(mode)
+    next if %w[persistent_valid persistent_slow health_then_eof].include?(mode)
     break
   end
   next unless request['type'] == 'request_action'
@@ -51,6 +51,21 @@ while (line = $stdin.gets)
   when 'persistent_slow'
     sleep 0.1
     puts JSON.generate('action' => 'draw')
+  when 'persistent_exit_slow'
+    sleep 0.1
+    puts JSON.generate('action' => 'draw')
+  when 'exit_slow_response'
+    sleep 0.1
+    puts JSON.generate('action' => 'draw')
+    $stdout.flush
+    exit
+  when 'health_then_eof'
+    if defined?(@health_response_sent) && @health_response_sent
+      exit
+    else
+      @health_response_sent = true
+      puts JSON.generate('action' => 'draw')
+    end
   end
   $stdout.flush
 end

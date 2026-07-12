@@ -61,6 +61,23 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     def fail_start! = @fail_start = true
   end
 
+  class HealthCheckedStrategy < RecordingStrategy
+    attr_reader :health_checks
+
+    def initialize(fail_health: false)
+      super()
+      @fail_health = fail_health
+      @health_checks = 0
+    end
+
+    def startup_health_check!
+      @health_checks += 1
+      raise 'fixture health failure' if @fail_health
+
+      self
+    end
+  end
+
   def machine_request(game: 'g1', transport: 'machine', generation: 1,
                       playable: [], actions: ['draw'])
     metadata = { decision_id: "d-#{game}-#{generation}", channel: '#uno', transport: transport }
@@ -289,6 +306,39 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     manager&.shutdown
   end
 
+  def test_select_health_checks_new_neural_strategy_before_publication
+    neural = HealthCheckedStrategy.new
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new }, neural: -> { neural }
+      }
+    )
+    result = manager.select('neural')
+    assert_predicate result, :success?
+    assert_equal 1, neural.health_checks
+    assert_equal 'neural', manager.selected_name
+    refute neural.shutdown?
+  ensure
+    manager&.shutdown
+  end
+
+  def test_select_rejects_and_shuts_down_failed_neural_health_check
+    neural = HealthCheckedStrategy.new(fail_health: true)
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new }, neural: -> { neural }
+      }
+    )
+    result = manager.select('neural')
+    assert_equal :configuration_error, result.code
+    assert_match(/neural startup health check failed/, result.message)
+    assert_equal 'simple', manager.selected_name
+    assert neural.shutdown?
+    refute_includes manager.instance_variable_get(:@all_instances), neural
+  ensure
+    manager&.shutdown
+  end
+
   def test_failed_game_start_discards_checked_out_instance_without_accumulating_sessions
     created = []
     manager = UnobotV2::StrategyManager.new(
@@ -340,6 +390,42 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     assert_equal 1, created.sum { |strategy| strategy.ended.length }
   ensure
     runtime&.stop
+  end
+
+  def test_human_neural_failure_cancels_session_before_resynchronization
+    process_fixture = File.expand_path('fixtures/process_agents/protocol_agent.rb', __dir__)
+    neural = UnobotV2::NeuralAgent.new(
+      process: UnobotV2::ProcessAgent.new(
+        argv: [RbConfig.ruby, process_fixture, 'health_then_eof'],
+        name: 'neural', lifecycle: :persistent,
+        request_timeout: 1, shutdown_timeout: 0.1
+      ),
+      cold_timeout: 1, warm_timeout: 0.5,
+      backoff_initial: 1, backoff_max: 2
+    )
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', limits: { neural: 1 },
+      factories: {
+        neural: -> { neural }, crushing: -> { RecordingStrategy.new }
+      }
+    )
+    sent = Queue.new
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'human', strategy: manager, channels: ['#uno'], own_nick: 'unobot',
+      host_nicks: ['Host'], transport: ->(target, line) { sent << [target, line] }
+    ).start
+
+    human_snapshot(runtime)
+    wait_for { neural.diagnostics[:consecutive_failures] == 1 }
+    wait_for { !manager.active? }
+    assert_predicate manager.select('crushing'), :success?
+    outputs = []
+    outputs << sent.pop until sent.empty?
+    assert_includes outputs, ['#uno', 'us']
+    assert_includes outputs, ['#uno', 'ca']
+  ensure
+    runtime&.stop
+    manager&.shutdown
   end
 
   def test_machine_runtime_retry_reregisters_without_replay

@@ -176,10 +176,14 @@ set. `UNO_NEURAL_COLD_TIMEOUT` defaults to 15 seconds and covers the first
 request after process spawn, including model load; `UNO_NEURAL_WARM_TIMEOUT`
 defaults to 1 second. Spawning itself is bounded by
 `UNO_NEURAL_SPAWN_TIMEOUT` (5 seconds). The upstream module emits no ready
-marker, so configuration validates executable/module/checkpoint paths before
-IRC startup, while the first valid action is the truthful load/readiness health
-check. Diagnostics report `unverified`, `loading`, `ready`, or `failed`
-without exposing argv, paths, or stderr contents.
+marker, so after validating executable/module/checkpoint paths the selected
+neural manager sends one reserved, valid two-player canonical decision under
+the cold deadline. Its action is validated and a game-end/reset is delivered
+before the IRC bridge is attached. The feed-forward module has no per-game
+memory and ignores that lifecycle frame, leaving the verified process warm and
+idle for the first live game. Load or inference failure aborts configuration;
+diagnostics report `unverified`, `loading`, `ready`, or `failed` without
+exposing argv, paths, or stderr contents.
 
 The healthy process stays warm across `game_end`/new-game resets. Timeouts,
 crashes, invalid output, and failed model loads terminate and reap its process
@@ -187,6 +191,10 @@ group, then impose exponential restart backoff. Configure the 1-second initial
 and 30-second maximum bounds with `UNO_NEURAL_BACKOFF_INITIAL` and
 `UNO_NEURAL_BACKOFF_MAX`. Cancellation and shutdown invalidate the current
 generation immediately; shutdown escalates TERM/KILL and reaps the group.
+Every successful child spawn advances a process generation. If a warm process
+dies while idle, its replacement is marked cold even though it is already alive
+by the time `start_game` returns, so model reload can never inherit the shorter
+warm deadline.
 
 The initial live release supports exactly this bot and one opponent. Because
 the canonical contract does not classify an opponent as human or automated,
