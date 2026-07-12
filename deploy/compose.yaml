@@ -1,7 +1,8 @@
 services:
   unobot:
-    image: ${UNO_IMAGE:-unobot-neural:17.5m}
-    restart: unless-stopped
+    image: ${UNO_IMAGE:?set UNO_IMAGE to an immutable sha256 image ID or RepoDigest}
+    platform: linux/amd64
+    restart: on-failure:3
     user: "10001:10001"
     read_only: true
     cap_drop:
@@ -16,8 +17,18 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
       - /run/unobot:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=10001,gid=10001
     volumes:
-      - ${UNO_CHECKPOINT:?set UNO_CHECKPOINT to checkpoint_17500000_steps.zip}:/models/checkpoint_17500000_steps.zip:ro
+      - type: bind
+        source: ${UNO_CHECKPOINT:?set UNO_CHECKPOINT to an absolute checkpoint path}
+        target: /models/checkpoint_17500000_steps.zip
+        read_only: true
+        bind:
+          create_host_path: false
       - unobot-logs:/unobot/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       TZ: ${TZ:-Europe/Berlin}
       IRC_SERVER: ${IRC_SERVER:?set IRC_SERVER}

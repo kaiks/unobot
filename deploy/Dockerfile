@@ -4,12 +4,14 @@ ARG RUBY_IMAGE=quay.io/evl.ms/fullstaq-ruby@sha256:fce5b291c13720c64f89e753f1833
 FROM ${RUBY_IMAGE}
 
 ARG JEDNA_REF=17ada2012112abf1df2cd2a31342fcad2f3ed18a
+ARG UNOBOT_REF
 ARG PYTHON_VERSION=3.11.2-1+b1
 ARG TINI_VERSION=0.19.0-1+b3
 
 LABEL org.opencontainers.image.title="unobot neural IRC player" \
       org.opencontainers.image.description="Ruby IRC client with local Jedna MaskablePPO inference" \
       org.opencontainers.image.source="https://github.com/kaiks/unobot" \
+      org.opencontainers.image.revision="${UNOBOT_REF}" \
       org.opencontainers.image.jedna.revision="${JEDNA_REF}"
 
 ENV APP_HOME=/unobot \
@@ -52,16 +54,15 @@ RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/python -c "import gymnasium, numpy, sb3_contrib, stable_baselines3, torch; assert torch.__version__ == '2.8.0+cpu'; assert stable_baselines3.__version__ == sb3_contrib.__version__ == '2.7.0'; assert gymnasium.__version__ == '1.2.0'; assert numpy.__version__ == '2.3.5'" && \
     rm /tmp/requirements-neural.lock
 
-# The `jedna_examples` named context is produced by deploy/build-image from a
-# git archive of JEDNA_REF. Only inference/stock-agent runtime files enter the
-# image; training code and checkpoints never do.
-COPY --from=jedna_examples simple_agent.rb /opt/jedna-tournaments/examples/simple_agent.rb
-COPY --from=jedna_examples crushing_agent.rb /opt/jedna-tournaments/examples/crushing_agent.rb
-COPY --from=jedna_examples crushing_agent/baseline_strategy.rb /opt/jedna-tournaments/examples/crushing_agent/baseline_strategy.rb
-COPY --from=jedna_examples rl_agent/__init__.py /opt/jedna-tournaments/examples/rl_agent/__init__.py
-COPY --from=jedna_examples rl_agent/encoding.py /opt/jedna-tournaments/examples/rl_agent/encoding.py
-COPY --from=jedna_examples rl_agent/sb3_opponent.py /opt/jedna-tournaments/examples/rl_agent/sb3_opponent.py
-COPY --from=jedna_examples JEDNA-LICENSE /opt/jedna-tournaments/JEDNA-LICENSE
+# The named context contains exactly these six files plus LICENSE, archived
+# from JEDNA_REF. Training code and checkpoints never enter BuildKit.
+COPY --from=jedna_runtime extension-gems/jedna-tournaments/examples/simple_agent.rb /opt/jedna-tournaments/examples/simple_agent.rb
+COPY --from=jedna_runtime extension-gems/jedna-tournaments/examples/crushing_agent.rb /opt/jedna-tournaments/examples/crushing_agent.rb
+COPY --from=jedna_runtime extension-gems/jedna-tournaments/examples/crushing_agent/baseline_strategy.rb /opt/jedna-tournaments/examples/crushing_agent/baseline_strategy.rb
+COPY --from=jedna_runtime extension-gems/jedna-tournaments/examples/rl_agent/__init__.py /opt/jedna-tournaments/examples/rl_agent/__init__.py
+COPY --from=jedna_runtime extension-gems/jedna-tournaments/examples/rl_agent/encoding.py /opt/jedna-tournaments/examples/rl_agent/encoding.py
+COPY --from=jedna_runtime extension-gems/jedna-tournaments/examples/rl_agent/sb3_opponent.py /opt/jedna-tournaments/examples/rl_agent/sb3_opponent.py
+COPY --from=jedna_runtime LICENSE /opt/jedna-tournaments/JEDNA-LICENSE
 
 COPY bot_config.rb uno_bot_starter.rb ./
 COPY lib/ ./lib/

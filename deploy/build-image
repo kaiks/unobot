@@ -3,24 +3,45 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 jedna_root=${JEDNA_ROOT:-"$root/../jedna"}
-jedna_ref=${JEDNA_REF:-17ada2012112abf1df2cd2a31342fcad2f3ed18a}
+accepted_jedna_ref=17ada2012112abf1df2cd2a31342fcad2f3ed18a
+jedna_ref=${JEDNA_REF:-$accepted_jedna_ref}
+unobot_ref=${UNOBOT_REF:-$(git -C "$root" rev-parse HEAD)}
 image=${UNO_IMAGE:-unobot-neural:17.5m}
 
+if [ "$jedna_ref" != "$accepted_jedna_ref" ] && [ "${UNO_ALLOW_UNACCEPTED_JEDNA_REF:-false}" != true ]; then
+  echo "refusing nonaccepted Jedna revision; set UNO_ALLOW_UNACCEPTED_JEDNA_REF=true explicitly" >&2
+  exit 2
+fi
 if ! git -C "$jedna_root" cat-file -e "$jedna_ref^{commit}" 2>/dev/null; then
   echo "Jedna commit $jedna_ref is unavailable; fetch it or set JEDNA_ROOT" >&2
+  exit 2
+fi
+if ! git -C "$root" cat-file -e "$unobot_ref^{commit}" 2>/dev/null; then
+  echo "unobot commit $unobot_ref is unavailable" >&2
   exit 2
 fi
 
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT INT TERM
+mkdir "$temporary/unobot" "$temporary/jedna-runtime"
+git -C "$root" archive "$unobot_ref" | tar -x -C "$temporary/unobot"
 git -C "$jedna_root" archive "$jedna_ref" \
-  extension-gems/jedna-tournaments/examples | tar -x -C "$temporary"
-examples="$temporary/extension-gems/jedna-tournaments/examples"
-git -C "$jedna_root" show "$jedna_ref:LICENSE" > "$examples/JEDNA-LICENSE"
+  LICENSE \
+  extension-gems/jedna-tournaments/examples/simple_agent.rb \
+  extension-gems/jedna-tournaments/examples/crushing_agent.rb \
+  extension-gems/jedna-tournaments/examples/crushing_agent/baseline_strategy.rb \
+  extension-gems/jedna-tournaments/examples/rl_agent/__init__.py \
+  extension-gems/jedna-tournaments/examples/rl_agent/encoding.py \
+  extension-gems/jedna-tournaments/examples/rl_agent/sb3_opponent.py | \
+  tar -x -C "$temporary/jedna-runtime"
 
 docker buildx build --load \
-  --build-context "jedna_examples=$examples" \
+  --platform linux/amd64 \
+  --build-context "jedna_runtime=$temporary/jedna-runtime" \
+  --build-arg "UNOBOT_REF=$unobot_ref" \
   --build-arg "JEDNA_REF=$jedna_ref" \
   --tag "$image" \
-  --file "$root/deploy/Dockerfile" \
-  "$root"
+  --file "$temporary/unobot/deploy/Dockerfile" \
+  "$temporary/unobot"
+
+docker image inspect "$image" --format 'built {{.Id}} unobot={{index .Config.Labels "org.opencontainers.image.revision"}} jedna={{index .Config.Labels "org.opencontainers.image.jedna.revision"}}'

@@ -1,28 +1,36 @@
 #!/bin/sh
 set -eu
 
-image=${UNO_IMAGE:-unobot-neural:17.5m}
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+image=${UNO_IMAGE:?set UNO_IMAGE to the built image tag or immutable ID}
 checkpoint=${UNO_CHECKPOINT:?set UNO_CHECKPOINT to checkpoint_17500000_steps.zip}
 expected=${UNO_NEURAL_CHECKPOINT_SHA256:-3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f}
+unobot_ref=${UNOBOT_REF:-$(git -C "$root" rev-parse HEAD)}
+jedna_ref=${JEDNA_REF:-17ada2012112abf1df2cd2a31342fcad2f3ed18a}
+
+case "$checkpoint" in /*) ;; *) echo 'UNO_CHECKPOINT must be an absolute path' >&2; exit 2 ;; esac
+
+actual_id=$(docker image inspect "$image" --format '{{.Id}}')
+test -z "${UNO_EXPECTED_IMAGE_ID:-}" || test "$actual_id" = "$UNO_EXPECTED_IMAGE_ID"
+test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$unobot_ref"
+test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.jedna.revision"}}')" = "$jedna_ref"
 
 test "$(sha256sum "$checkpoint" | cut -d ' ' -f 1)" = "$expected"
 
-docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-  --entrypoint /usr/bin/tini "$image" -- \
-  /opt/venv/bin/python -c \
-  "import gymnasium,numpy,sb3_contrib,stable_baselines3,torch; print(torch.__version__,stable_baselines3.__version__,sb3_contrib.__version__,gymnasium.__version__,numpy.__version__)"
+docker run --rm --platform linux/amd64 --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m "$image" \
+  /bin/sh -c "ruby -e \"abort unless RUBY_VERSION == '3.4.4'\" && python3 -c \"import sys; assert sys.version_info[:3] == (3,11,2)\" && /opt/venv/bin/python -c \"import gymnasium,numpy,sb3_contrib,stable_baselines3,torch; assert torch.__version__ == '2.8.0+cpu'; assert stable_baselines3.__version__ == sb3_contrib.__version__ == '2.7.0'; assert gymnasium.__version__ == '1.2.0'; assert numpy.__version__ == '2.3.5'\""
 
-docker run --rm --entrypoint /bin/sh "$image" -c \
+docker run --rm --platform linux/amd64 "$image" /bin/sh -c \
   'test "$(id -u)" = 10001 && test ! -e /models/checkpoint_17500000_steps.zip && test ! -d /unobot/.git && test ! -d /unobot/test && test ! -e /opt/jedna-tournaments/examples/rl_agent/train_sb3.py'
 
 request='{"type":"request_action","state":{"your_id":"bot","hand":["r5"],"top_card":"b7","game_state":"normal","stacked_cards":0,"already_picked":false,"picked_card":null,"other_players":[{"id":"human","card_count":7}],"available_actions":["draw"],"playable_cards":[]}}'
 responses=$(printf '%s\n%s\n%s\n' "$request" "$request" "$request" | \
-  docker run --rm -i --read-only --memory=1g --pids-limit=128 \
+  docker run --rm -i --platform linux/amd64 --read-only --memory=1g --pids-limit=128 \
     --mount "type=bind,source=$checkpoint,target=/models/checkpoint_17500000_steps.zip,readonly" \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-    --entrypoint /usr/bin/tini "$image" -- \
+    -e UNO_STRATEGY=Neural "$image" \
     /bin/sh -c 'cd /opt/jedna-tournaments/examples && exec /opt/venv/bin/python -m rl_agent.sb3_opponent --model /models/checkpoint_17500000_steps.zip')
 
-test "$(printf '%s\n' "$responses" | wc -l)" -eq 3
-test "$(printf '%s\n' "$responses" | sort -u | wc -l)" -eq 1
+printf '%s\n' "$responses" | ruby -rjson -e 'lines = STDIN.readlines(chomp: true); abort unless lines.length == 3; abort unless lines.map { |line| JSON.parse(line) }.all? { |action| action == { "action" => "draw" } }'
 printf '%s\n' "$responses"

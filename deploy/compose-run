@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+: "${UNO_IMAGE:?set UNO_IMAGE to an immutable sha256 image ID or RepoDigest}"
+: "${UNO_CHECKPOINT:?set UNO_CHECKPOINT to an absolute checkpoint path}"
+
+case "$UNO_IMAGE" in sha256:*|*@sha256:*) ;; *) echo 'UNO_IMAGE must be an immutable image ID or RepoDigest' >&2; exit 2 ;; esac
+case "$UNO_CHECKPOINT" in /*) ;; *) echo 'UNO_CHECKPOINT must be absolute' >&2; exit 2 ;; esac
+test -f "$UNO_CHECKPOINT" || { echo 'UNO_CHECKPOINT must name an existing file' >&2; exit 2; }
+
+exec docker compose -f "$root/deploy/compose.yaml" "$@"
