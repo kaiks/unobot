@@ -8,15 +8,15 @@ require_relative 'interfaces'
 require_relative 'strategy_factory'
 
 module UnobotV2
-  # Owns strategy selection and game-scoped process lifecycle. Messaging mode
-  # is deliberately absent from selection: it appears only in the game key.
+  # Owns strategy selection and independent game-scoped strategy lifecycles.
+  # Messaging mode changes only the canonical session key, never the strategy
+  # interface. Multiple IRC channels therefore cannot cancel each other.
   class StrategyManager < Strategy
     Result = Struct.new(:code, :message, :strategy, :game_key, keyword_init: true) do
       def success? = code == :ok
       def error? = !success?
     end
-
-    attr_reader :selected_name
+    Session = Struct.new(:key, :scope, :name, :strategy, keyword_init: true)
 
     def self.from_env(env: ENV, **options)
       selected = Configuration.strategy(env)
@@ -27,22 +27,28 @@ module UnobotV2
       @factories = factories.transform_keys { |key| key.to_s.downcase }.freeze
       @on_status = on_status
       @mutex = Mutex.new
-      @instances = {}
-      @active_game_key = nil
-      @active_name = nil
-      @active_strategy = nil
+      @sessions = {}
+      @idle = Hash.new { |hash, key| hash[key] = [] }
+      @all_instances = []
       @shutdown = false
       @selected_name = normalize(selected)
       validate_supported!(@selected_name)
+      # Validate the selected executable/script before IRC can connect. This
+      # constructs no child process; ProcessAgent spawning remains game-lazy.
+      eager = @factories.fetch(@selected_name).call
+      @all_instances << eager
+      @idle[@selected_name] << eager
     end
 
+    def selected_name = @mutex.synchronize { @selected_name }
+
     def decide(request)
-      game_key = game_key_for(request)
-      strategy = activate(game_key)
-      action = strategy.decide(request)
+      key, scope = identity_for(request)
+      session = activate(key, scope)
+      action = session.strategy.decide(request)
       ActionValidator.validate(action, request: request)
     rescue StandardError => error
-      status(:decision_failed, error.message, game_key: game_key)
+      status(:decision_failed, error.message, game_key: key)
       raise
     end
 
@@ -51,11 +57,11 @@ module UnobotV2
       validate_supported!(requested)
       @mutex.synchronize do
         return Result.new(code: :shutdown, message: 'strategy manager is shut down', strategy: @selected_name) if @shutdown
-        if @active_game_key
+        unless @sessions.empty?
           return Result.new(
             code: :game_active,
-            message: "strategy #{@active_name} is frozen until the active game ends",
-            strategy: @active_name, game_key: @active_game_key
+            message: 'strategy selection is frozen until every active game ends',
+            strategy: @selected_name, game_key: @sessions.keys.sort.join(',')
           )
         end
 
@@ -66,52 +72,25 @@ module UnobotV2
     end
 
     def game_end(game_key = nil, reason: 'game_end')
-      strategy, key = @mutex.synchronize do
-        return Result.new(code: :no_active_game, strategy: @selected_name) unless @active_game_key
-        if game_key && @active_game_key != game_key.to_s
-          return Result.new(code: :stale_game, message: 'game key is no longer active',
-                            strategy: @active_name, game_key: @active_game_key)
-        end
-
-        values = [@active_strategy, @active_game_key]
-        clear_active_locked
-        values
-      end
-      strategy.end_game(key, reason: reason) if strategy.respond_to?(:end_game)
-      status(:game_ended, reason, game_key: key)
-      Result.new(code: :ok, strategy: selected_name, game_key: key)
+      release(game_key, reason: reason, cancel: false)
     end
 
     def cancel_game(game_key = nil, reason: 'cancelled')
-      strategy, key = @mutex.synchronize do
-        return Result.new(code: :no_active_game, strategy: @selected_name) unless @active_game_key
-        if game_key && @active_game_key != game_key.to_s
-          return Result.new(code: :stale_game, strategy: @active_name, game_key: @active_game_key)
-        end
-
-        values = [@active_strategy, @active_game_key]
-        clear_active_locked
-        values
-      end
-      if strategy.respond_to?(:cancel)
-        strategy.cancel(reason: reason)
-      elsif strategy.respond_to?(:end_game)
-        strategy.end_game(key, reason: reason)
-      end
-      status(:game_cancelled, reason, game_key: key)
-      Result.new(code: :ok, strategy: selected_name, game_key: key)
+      release(game_key, reason: reason, cancel: true)
     end
 
-    # Deterministic stock agents do not invent another action after the host
-    # may have executed one. They invalidate the game and request authority.
+    # Deterministic stock agents never invent another action after an executor
+    # error which may follow an executed command. They request authoritative
+    # registration without replaying or invoking #decide again.
     def retryable_error(request, code:)
-      strategy = @mutex.synchronize { @active_strategy }
+      key, = identity_for(request)
+      strategy = @mutex.synchronize { @sessions[key]&.strategy }
       return :reregister unless strategy&.respond_to?(:retry_capable?) && strategy.retry_capable?
 
       replacement = strategy.retry_action(request, code: code)
       ActionValidator.validate(replacement, request: request)
     rescue StandardError => error
-      status(:retry_failed, error.message, game_key: game_key_for(request))
+      status(:retry_failed, error.message, game_key: key)
       :reregister
     end
 
@@ -120,8 +99,9 @@ module UnobotV2
         return self if @shutdown
 
         @shutdown = true
-        clear_active_locked
-        @instances.values.dup
+        @sessions.clear
+        @idle.clear
+        @all_instances.dup
       end
       instances.each { |strategy| strategy.shutdown if strategy.respond_to?(:shutdown) }
       status(:shutdown)
@@ -131,61 +111,125 @@ module UnobotV2
     def diagnostics
       @mutex.synchronize do
         {
-          selected: @selected_name, active_strategy: @active_name,
-          active_game: @active_game_key, shutdown: @shutdown,
-          strategies: @instances.transform_values do |strategy|
-            strategy.respond_to?(:diagnostics) ? strategy.diagnostics : { status: :available }
-          end
+          selected: @selected_name, active_games: @sessions.keys.sort.freeze,
+          shutdown: @shutdown,
+          sessions: @sessions.transform_values do |session|
+            details = session.strategy.respond_to?(:diagnostics) ? session.strategy.diagnostics : { status: :available }
+            { strategy: session.name, diagnostics: details }.freeze
+          end.freeze
         }.freeze
       end
     end
 
-    def active_game_key = @mutex.synchronize { @active_game_key }
-    def active? = !active_game_key.nil?
+    def active_game_keys = @mutex.synchronize { @sessions.keys.sort.freeze }
+    def active? = @mutex.synchronize { !@sessions.empty? }
 
     private
 
-    def activate(game_key)
+    def activate(key, scope)
       replaced = nil
-      strategy = @mutex.synchronize do
+      started = false
+      session = @mutex.synchronize do
         raise Configuration::Error, 'strategy manager is shut down' if @shutdown
-        return @active_strategy if @active_game_key == game_key
+        existing = @sessions[key]
+        next existing if existing
 
-        replaced = [@active_strategy, @active_game_key] if @active_game_key
-        @active_name = @selected_name
-        @active_strategy = instance_for_locked(@active_name)
-        @active_game_key = game_key
-        @active_strategy
+        # A fresh generation/game in one channel replaces only that channel.
+        stale_key, stale = @sessions.find { |_candidate, value| value.scope == scope }
+        if stale
+          @sessions.delete(stale_key)
+          replaced = stale
+          cancel_strategy(stale.strategy, stale.key, 'new_game_observed')
+          retire_locked(stale)
+        end
+
+        name = @selected_name
+        strategy = checkout_locked(name)
+        created = Session.new(key: key, scope: scope, name: name, strategy: strategy).freeze
+        # Start is bounded and serialized with publication. game_end/cancel can
+        # interrupt a later blocked #decide, but can never start an orphan.
+        strategy.start_game(key) if strategy.respond_to?(:start_game)
+        @sessions[key] = created
+        started = true
+        created
       end
-      if replaced
-        old_strategy, old_key = replaced
-        old_strategy.cancel(reason: 'new_game_observed') if old_strategy.respond_to?(:cancel)
-        status(:game_replaced, nil, game_key: old_key)
-      end
-      strategy.start_game(game_key) if strategy.respond_to?(:start_game)
-      status(:game_started, nil, strategy: @active_name, game_key: game_key)
-      strategy
+      status(:game_replaced, nil, game_key: replaced.key) if replaced
+      status(:game_started, nil, strategy: session.name, game_key: key) if started
+      session
     end
 
-    def game_key_for(request)
+    def release(game_key, reason:, cancel:)
+      session = @mutex.synchronize do
+        return Result.new(code: :no_active_game, strategy: @selected_name) if @sessions.empty?
+        key = resolve_key_locked(game_key)
+        return key if key.is_a?(Result)
+
+        found = @sessions.delete(key)
+        if cancel
+          cancel_strategy(found.strategy, found.key, reason)
+        elsif found.strategy.respond_to?(:end_game)
+          found.strategy.end_game(found.key, reason: reason)
+        end
+        retire_locked(found)
+        found
+      end
+      event = cancel ? :game_cancelled : :game_ended
+      status(event, reason, game_key: session.key)
+      Result.new(code: :ok, strategy: selected_name, game_key: session.key)
+    end
+
+    def resolve_key_locked(game_key)
+      return game_key.to_s if game_key && @sessions.key?(game_key.to_s)
+      if game_key
+        return Result.new(code: :stale_game, message: 'game key is no longer active',
+                          strategy: @selected_name, game_key: game_key.to_s)
+      end
+      return @sessions.keys.first if @sessions.one?
+
+      Result.new(code: :ambiguous_game, message: 'game key is required with multiple active games',
+                 strategy: @selected_name)
+    end
+
+    def cancel_strategy(strategy, key, reason)
+      if strategy.respond_to?(:cancel)
+        strategy.cancel(reason: reason)
+      elsif strategy.respond_to?(:end_game)
+        strategy.end_game(key, reason: reason)
+      end
+    end
+
+    def checkout_locked(name)
+      strategy = @idle[name].pop || @factories.fetch(name).call
+      @all_instances << strategy unless @all_instances.include?(strategy)
+      strategy
+    rescue KeyError
+      raise Configuration::Error, "strategy #{name.inspect} is not available"
+    end
+
+    def retire_locked(session)
+      if session.strategy.respond_to?(:lifecycle) && session.strategy.lifecycle == :persistent
+        @idle[session.name] << session.strategy
+      elsif session.strategy.respond_to?(:shutdown)
+        session.strategy.shutdown
+      end
+    end
+
+    def identity_for(request)
       metadata = request.metadata
+      channel = metadata[:channel].to_s.downcase
+      raise Canonical::ValidationError, 'request lacks channel' if channel.empty?
+
       if metadata[:transport] == 'machine'
         game_id = metadata[:game_id].to_s
         raise Canonical::ValidationError, 'machine request lacks game_id' if game_id.empty?
 
-        "machine:#{metadata[:channel]}:#{game_id}"
+        ["machine:#{channel}:#{game_id}".freeze, "machine:#{channel}".freeze]
       else
         generation = metadata[:game_generation] || metadata[:generation]
         raise Canonical::ValidationError, 'human request lacks game generation' if generation.nil?
 
-        "human:#{metadata[:channel]}:#{generation}"
-      end.freeze
-    end
-
-    def instance_for_locked(name)
-      @instances[name] ||= @factories.fetch(name).call
-    rescue KeyError
-      raise Configuration::Error, "strategy #{name.inspect} is not available"
+        ["human:#{channel}:#{generation}".freeze, "human:#{channel}".freeze]
+      end
     end
 
     def normalize(name)
@@ -204,10 +248,6 @@ module UnobotV2
               'UNO_RUNTIME=v2 with UNO_STRATEGY=legacy is unsupported: UnoAI requires historical IRC tracker state'
       end
       raise Configuration::Error, "strategy #{name.inspect} is not configured"
-    end
-
-    def clear_active_locked
-      @active_game_key = @active_name = @active_strategy = nil
     end
 
     def status(code, message = nil, **values)

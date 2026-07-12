@@ -2,6 +2,7 @@
 
 require_relative 'test_helper'
 require 'rbconfig'
+require 'minitest/mock'
 require_relative '../lib/unobot_v2'
 
 class UnobotV2ProcessAgentTest < Minitest::Test
@@ -120,5 +121,82 @@ class UnobotV2ProcessAgentTest < Minitest::Test
       UnobotV2::ProcessAgent.new(argv: [RbConfig.ruby, '/definitely/missing.rb'], name: 'bad')
     end
     assert_equal :missing_script, error.code
+  end
+
+  def test_concurrent_decision_and_game_end_never_leave_a_child_or_late_action
+    10.times do |index|
+      strategy = agent('timeout', request_timeout: 2.0)
+      outcome = Queue.new
+      decision = Thread.new do
+        strategy.decide(request)
+        outcome << :action
+      rescue StandardError => error
+        outcome << error.code
+      end
+      sleep 0.005 until strategy.diagnostics[:generation] >= 2
+      pid = strategy.instance_variable_get(:@wait_thread)&.pid
+      strategy.end_game('g1', reason: "race-#{index}")
+      assert decision.join(1)
+      refute_equal :action, outcome.pop
+      refute strategy.running?
+      assert_raises(Errno::ESRCH) { Process.kill(0, pid) } if pid
+    end
+  end
+
+  def test_concurrent_start_and_cancel_are_serialized_without_double_spawn
+    10.times do
+      strategy = UnobotV2::ProcessAgent.new(
+        argv: [RbConfig.ruby, FIXTURE, 'valid'], name: 'start-race',
+        startup_timeout: 1, request_timeout: 1, shutdown_timeout: 0.1
+      )
+      @agents ||= []
+      @agents << strategy
+      outcomes = Queue.new
+      starter = Thread.new do
+        strategy.start_game('g1')
+        outcomes << :started
+      rescue UnobotV2::ProcessAgent::Error => error
+        outcomes << error.code
+      end
+      canceller = Thread.new { strategy.cancel(reason: 'startup race') }
+      assert starter.join(2)
+      assert canceller.join(2)
+      assert_includes %i[started cancelled], outcomes.pop
+      refute strategy.running?
+    end
+  end
+
+  def test_startup_timeout_and_immediate_exit_keep_the_structured_failure
+    strategy = UnobotV2::ProcessAgent.new(
+      argv: [RbConfig.ruby, FIXTURE, 'valid'], name: 'slow-start',
+      startup_timeout: 0.05, shutdown_timeout: 0.05
+    )
+    @agents ||= []
+    @agents << strategy
+    slow_spawn = lambda do |*_argv, **_options|
+      sleep 1
+      raise 'unreachable'
+    end
+    error = Open3.stub(:popen3, slow_spawn) do
+      assert_raises(UnobotV2::ProcessAgent::Error) { strategy.start_game('g1') }
+    end
+    assert_equal :startup_timeout, error.code
+    refute strategy.running?
+
+    immediate = UnobotV2::ProcessAgent.new(
+      argv: [RbConfig.ruby, FIXTURE, 'immediate_exit'], name: 'immediate',
+      startup_timeout: 1, shutdown_timeout: 0.05
+    )
+    @agents << immediate
+    # Scheduling may observe the exit just after start; in either case the
+    # first request reports a structured startup/EOF failure and reaps it.
+    begin
+      immediate.start_game('g1')
+      error = assert_raises(UnobotV2::ProcessAgent::Error) { immediate.decide(request) }
+      assert_includes %i[startup_failed process_eof], error.code
+    rescue UnobotV2::ProcessAgent::Error => error
+      assert_equal :startup_failed, error.code
+    end
+    refute immediate.running?
   end
 end

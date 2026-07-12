@@ -78,6 +78,34 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     manager&.shutdown
   end
 
+  def test_two_machine_channels_have_independent_strategy_instances_and_lifecycles
+    created = []
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new.tap { |strategy| created << strategy } },
+        crushing: -> { RecordingStrategy.new }
+      }
+    )
+    first = machine_request(game: 'one')
+    second = UnobotV2::Canonical::DecisionRequest.new(
+      **machine_request(game: 'two').state_h,
+      metadata: machine_request(game: 'two').metadata.merge(channel: '#other')
+    )
+    manager.decide(first)
+    manager.decide(second)
+
+    assert_equal %w[machine:#other:two machine:#uno:one], manager.active_game_keys
+    active = created.select { |strategy| strategy.requests.any? }
+    assert_equal 2, active.length
+    refute_same active[0], active[1]
+    assert_predicate manager.game_end('machine:#uno:one'), :success?
+    assert_equal ['machine:#other:two'], manager.active_game_keys
+    assert_empty active.find { |strategy| strategy.requests.include?(second) }.ended
+    assert_equal :game_active, manager.select('crushing').code
+  ensure
+    manager&.shutdown
+  end
+
   def test_human_game_generation_is_the_conservative_session_key
     strategy = RecordingStrategy.new
     manager = UnobotV2::StrategyManager.new(selected: 'simple', factories: { simple: -> { strategy } })

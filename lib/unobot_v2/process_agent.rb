@@ -51,6 +51,8 @@ module UnobotV2
       @clock = clock
       @state_mutex = Mutex.new
       @request_mutex = Mutex.new
+      @write_mutex = Mutex.new
+      @lifecycle_mutex = Mutex.new
       @stderr_mutex = Mutex.new
       @generation = 0
       @stderr_tail = +''
@@ -71,13 +73,13 @@ module UnobotV2
       return self if current == key
 
       end_game(current, reason: 'game_replaced') if current
-      @state_mutex.synchronize do
+      token = @state_mutex.synchronize do
         raise Error.new(:shutdown, 'agent has been shut down') if @closed
 
         @game_key = key
         @generation += 1
       end
-      start_process unless running?
+      start_process(expected_generation: token) unless running?
       self
     end
 
@@ -89,7 +91,7 @@ module UnobotV2
 
           @generation += 1
         end
-        start_process unless running?
+        start_process(expected_generation: token) unless running?
         reject_pending_stdout!
         write_request(request, token)
         raw = read_response(token, deadline: now + @request_timeout)
@@ -204,56 +206,82 @@ module UnobotV2
       File.basename(executable).match?(/\Aruby(?:\d+(?:\.\d+)*)?\z/)
     end
 
-    def start_process
-      @state_mutex.synchronize do
-        raise Error.new(:shutdown, 'agent has been shut down') if @closed
-        return if @wait_thread&.alive?
-        cleanup_io_locked
-        @status = :starting
-      end
-
-      result = Queue.new
-      starter = Thread.new do
+    def start_process(expected_generation: nil)
+      failure = nil
+      @lifecycle_mutex.synchronize do
+        wait_thread = nil
         begin
-          result << [:ok, Open3.popen3(*@argv, pgroup: true)]
-        rescue StandardError => error
-          result << [:error, error]
+          @state_mutex.synchronize do
+            raise Error.new(:shutdown, 'agent has been shut down') if @closed
+            if expected_generation && (@generation != expected_generation || @game_key.nil?)
+              raise Error.new(:cancelled, 'agent start was cancelled')
+            end
+            return if @wait_thread&.alive?
+            cleanup_io_locked
+            @status = :starting
+          end
+
+          result = Queue.new
+          starter = Thread.new do
+            begin
+              result << [:ok, Open3.popen3(*@argv, pgroup: true)]
+            rescue StandardError => error
+              result << [:error, error]
+            end
+          end
+          unless starter.join(@startup_timeout)
+            starter.kill
+            raise Error.new(:startup_timeout, 'agent startup exceeded its deadline')
+          end
+          kind, value = result.pop
+          raise Error.new(:startup_failed, value.message) if kind == :error
+
+          stdin, stdout, stderr, wait_thread = value
+          stdin.sync = true
+          cancelled = @state_mutex.synchronize do
+            invalid = @closed || (expected_generation &&
+              (@generation != expected_generation || @game_key.nil?))
+            unless invalid
+              @stdin, @stdout, @stderr, @wait_thread = stdin, stdout, stderr, wait_thread
+              @stdout_buffer = +''
+              @status = :running
+            end
+            invalid
+          end
+          raise Error.new(:cancelled, 'agent start was cancelled') if cancelled
+
+          start_stderr_drain(stderr)
+          Thread.pass
+          raise Error.new(:startup_failed, "agent exited during startup (status #{wait_thread.value.exitstatus})") unless wait_thread.alive?
+        rescue Error => error
+          failure = error
+          if wait_thread&.alive?
+            terminate(wait_thread, 'TERM')
+            wait_thread.join(@shutdown_timeout)
+            terminate(wait_thread, 'KILL') if wait_thread.alive?
+            wait_thread.join(@shutdown_timeout)
+          end
+          [stdin, stdout, stderr].compact.each { |io| io.close rescue nil }
+          cleanup_process_locked
         end
       end
-      unless starter.join(@startup_timeout)
-        starter.kill
-        raise Error.new(:startup_timeout, 'agent startup exceeded its deadline')
-      end
-      kind, value = result.pop
-      raise Error.new(:startup_failed, value.message) if kind == :error
 
-      stdin, stdout, stderr, wait_thread = value
-      stdin.sync = true
-      @state_mutex.synchronize do
-        @stdin, @stdout, @stderr, @wait_thread = stdin, stdout, stderr, wait_thread
-        @stdout_buffer = +''
-        @status = :running
-      end
-      start_stderr_drain(stderr)
-      Thread.pass
-      return if wait_thread.alive?
-
-      raise Error.new(:startup_failed, "agent exited during startup (status #{wait_thread.value.exitstatus})")
-    rescue Error
-      stop_process(graceful: false)
-      raise
+      raise failure if failure
     end
 
     def write_request(request, token)
-      ensure_current!(token)
-      line = JSON.generate(request.protocol_h)
-      stdin = @state_mutex.synchronize { @stdin }
-      raise Error.new(:not_running, 'agent input is unavailable') unless stdin
+      @write_mutex.synchronize do
+        ensure_current!(token)
+        line = JSON.generate(request.protocol_h)
+        stdin = @state_mutex.synchronize { @stdin }
+        raise Error.new(:not_running, 'agent input is unavailable') unless stdin
 
-      stdin.write(line)
-      stdin.write("\n")
-      stdin.flush
+        stdin.write(line)
+        stdin.write("\n")
+        stdin.flush
+      end
     rescue Errno::EPIPE, IOError => error
+      ensure_current!(token)
       raise Error.new(:process_eof, error.message)
     end
 
@@ -279,7 +307,9 @@ module UnobotV2
         chunk = stdout.read_nonblock(READ_CHUNK, exception: false)
         case chunk
         when :wait_readable then next
-        when nil then raise Error.new(:process_eof, 'agent closed stdout')
+        when nil
+          ensure_current!(token)
+          raise Error.new(:process_eof, 'agent closed stdout')
         else @stdout_buffer << chunk
         end
       end
@@ -334,13 +364,15 @@ module UnobotV2
     end
 
     def notify(message)
-      stdin = @state_mutex.synchronize { @stdin }
-      return false unless stdin && !stdin.closed?
+      @write_mutex.synchronize do
+        stdin = @state_mutex.synchronize { @stdin }
+        return false unless stdin && !stdin.closed?
 
-      stdin.write(JSON.generate(message))
-      stdin.write("\n")
-      stdin.flush
-      true
+        stdin.write(JSON.generate(message))
+        stdin.write("\n")
+        stdin.flush
+        true
+      end
     rescue Errno::EPIPE, IOError
       false
     end
@@ -364,17 +396,22 @@ module UnobotV2
     end
 
     def stop_process(graceful:)
-      stdin, wait_thread = @state_mutex.synchronize { [@stdin, @wait_thread] }
-      return cleanup_process unless wait_thread
+      @lifecycle_mutex.synchronize do
+        stdin, wait_thread = @state_mutex.synchronize { [@stdin, @wait_thread] }
+        unless wait_thread
+          cleanup_process_locked
+          next
+        end
 
-      stdin&.close unless stdin&.closed?
-      wait_thread.join(graceful ? @shutdown_timeout : 0.05)
-      terminate(wait_thread, 'TERM') if wait_thread.alive?
-      wait_thread.join(@shutdown_timeout)
-      terminate(wait_thread, 'KILL') if wait_thread.alive?
-      wait_thread.join(@shutdown_timeout)
-    ensure
-      cleanup_process
+        @write_mutex.synchronize { stdin&.close unless stdin&.closed? }
+        wait_thread.join(graceful ? @shutdown_timeout : 0.05)
+        terminate(wait_thread, 'TERM') if wait_thread.alive?
+        wait_thread.join(@shutdown_timeout)
+        terminate(wait_thread, 'KILL') if wait_thread.alive?
+        wait_thread.join(@shutdown_timeout)
+      ensure
+        cleanup_process_locked
+      end
     end
 
     def terminate(wait_thread, signal)
@@ -387,7 +424,7 @@ module UnobotV2
       end
     end
 
-    def cleanup_process
+    def cleanup_process_locked
       stderr_thread = @state_mutex.synchronize do
         thread = @stderr_thread
         cleanup_io_locked

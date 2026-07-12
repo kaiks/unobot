@@ -4,6 +4,7 @@
 require 'json'
 
 mode = ARGV.fetch(0, 'valid')
+exit 17 if mode == 'immediate_exit'
 
 while (line = $stdin.gets)
   request = JSON.parse(line)
