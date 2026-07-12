@@ -6,6 +6,7 @@ module UnobotV2
 
     MESSAGING = %w[human machine].freeze
     RUNTIMES = %w[legacy v2].freeze
+    STRATEGIES = %w[legacy simple crushing].freeze
     TRUE_VALUES = %w[1 true yes on].freeze
 
     module_function
@@ -19,6 +20,13 @@ module UnobotV2
       return value if RUNTIMES.include?(value)
 
       raise Error, "invalid UNO_RUNTIME #{value.inspect}; expected legacy or v2"
+    end
+
+    def strategy(env = ENV)
+      value = env.fetch('UNO_STRATEGY', 'legacy').to_s.downcase
+      return value if STRATEGIES.include?(value)
+
+      raise Error, "invalid UNO_STRATEGY #{value.inspect}; expected legacy, simple, or crushing"
     end
 
     def fallback_enabled?(env = ENV)
