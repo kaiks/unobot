@@ -136,6 +136,7 @@ module UnobotV2
         @last_status_signature = nil
         @status_anchor = nil
         @pending_count_assertions = {}
+        @play_effect_pending = false
       end
 
       def host?(nick)
@@ -214,6 +215,7 @@ module UnobotV2
         return drew(DRAW_RE.match(text)[1]) if DRAW_RE.match?(text)
         return double_pending if text == '[Playing two cards]'
         return reverse_order(text) if text.match?(/\APlayer order reversed(?: twice)?!\z/)
+        return play_effect if text.match?(/\A.+ (?:was|were) skipped!\z/)
         return game_end if text.match?(/ gains \d+ points\.|loses instantly|Uno game has been stopped\./)
         if text.include?("'s turn") || text.include?('Top card:') || text.start_with?('Card count:')
           uncertain!('malformed_game_event')
@@ -256,6 +258,7 @@ module UnobotV2
         @drawn_this_turn.clear
         @private_penalty_draw.clear
         @pending_count_assertions.clear
+        @play_effect_pending = false
         %i[phase current top_card game_state stacked_cards already_picked players].each { |fact| @facts[fact] = 'exact' }
         if phase != 'active'
           @unsafe_reasons = ['game_not_active']
@@ -343,7 +346,7 @@ module UnobotV2
       end
 
       def turn(match)
-        return Reduction.new if match[0] == @last_turn_line
+        return Reduction.new if match[0] == @last_turn_line && !@play_effect_pending
 
         passer, current, card_text = match.captures
         cards = CardParser.parse_all(card_text)
@@ -382,7 +385,11 @@ module UnobotV2
             uncertain!('unexpected_passer')
             return Reduction.new(commands: resync_commands, changed: true)
           end
-          penalty = if @private_penalty_draw.delete(passer)
+          private_penalty = @private_penalty_draw.delete(passer)
+          if @stacked.positive? && passer == own_nick && !private_penalty
+            return unsafe_reduction('missing_private_war_penalty')
+          end
+          penalty = if private_penalty
                       0
                     elsif @stacked.positive?
                       @stacked
@@ -407,6 +414,7 @@ module UnobotV2
         @private_draw_seen = false
         @unsafe_reasons.delete('awaiting_penalty_pass')
         @double_pending = false
+        @play_effect_pending = false
         if passer
           @mode = 'normal'
           @stacked = 0
@@ -448,11 +456,21 @@ module UnobotV2
           Reduction.new(commands: resync_commands, changed: true)
         else
           @double_pending = true
+          @play_effect_pending = true
           Reduction.new(changed: true)
         end
       end
 
       def reverse_order(text)
+        @status_anchor = nil
+        @play_effect_pending = true
+        @facts[:players] = 'derived'
+        Reduction.new(changed: true)
+      end
+
+      def play_effect
+        @status_anchor = nil
+        @play_effect_pending = true
         @facts[:players] = 'derived'
         Reduction.new(changed: true)
       end

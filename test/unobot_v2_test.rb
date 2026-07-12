@@ -274,6 +274,25 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal 1, request.other_players.find { |player| player.id == 'Bob' }.card_count
   end
 
+  def test_skip_announcement_disambiguates_identical_status_anchored_turn
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3', top: 'bs')
+    @adapter.receive(event('Alice was skipped!'))
+    @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
+    counts = @adapter.reducer.instance_variable_get(:@counts)
+    assert_equal 1, counts.fetch('Bob')
+
+    # A repeated turn line without another effect announcement remains a duplicate.
+    @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
+    assert_equal 1, counts.fetch('Bob')
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3', top: 'bs')
+    @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
+    @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
+    counts = @adapter.reducer.instance_variable_get(:@counts)
+    assert_equal 2, counts.fetch('Bob'), 'unaccompanied repeated snapshot turn is deduplicated'
+  end
+
   def test_submitted_same_top_skip_is_not_mistaken_for_a_status_duplicate
     request = synchronize(hand: "\x0312[S] #{RED_5}", top: 'bs', players: 'Alice:2,Bob:2')
     result = @adapter.submit({ action: 'play', card: 'bs' }, decision_id: request.decision_id)
@@ -392,6 +411,29 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     @adapter.receive(event('', kind: :reconnect))
     assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.slice(before, 2)
     refute @adapter.reducer.safe?
+  end
+
+  def test_missing_own_private_war_penalty_cannot_become_safe_next_round
+    synchronize(top: 'r+2', mode: 'war_+2', stacked: 4, players: 'Alice:2,Bob:2',
+                hand: "#{RED_5} #{GREEN_3}")
+    before = @requests.length
+    reduction = @adapter.receive(event("Alice passes. Bob's turn. Top card: #{RED_PLUS_2}"))
+    assert_equal 'missing private war penalty', reduction.reason
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
+    assert_equal 2, @adapter.reducer.instance_variable_get(:@counts).fetch('Alice')
+    refute @adapter.reducer.safe?
+
+    # A later public turn cannot bless the stale two-card hand.
+    @adapter.receive(event("Alice's turn. Top card: #{RED_5}"))
+    assert_equal before, @requests.length
+    refute @adapter.reducer.safe?
+
+    fresh_hand = "#{RED_5} #{GREEN_3} \x0312[1] \x0312[2] \x033[4] \x037[6]"
+    request = synchronize(top: 'r5', mode: 'normal', stacked: 0,
+                          players: 'Alice:6,Bob:1', hand: fresh_hand)
+    assert_equal 6, request.hand.length
+    assert_equal before + 1, @requests.length
+    assert @adapter.reducer.safe?
   end
 
   def test_observed_and_resynchronized_states_are_differentially_equal
