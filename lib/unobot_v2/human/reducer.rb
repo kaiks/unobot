@@ -60,6 +60,7 @@ module UnobotV2
       def safe?
         !!(phase == 'active' && @current == own_nick && @hand && @top_card &&
            @players.any? && @mode != 'unknown' && @unsafe_reasons.empty? &&
+           continuously_complete? && @counts[own_nick] == @hand.length &&
            (!@already_picked || @picked_card))
       end
 
@@ -307,7 +308,6 @@ module UnobotV2
 
       def player_joined(nick)
         @players << nick unless @players.include?(nick)
-        @counts[nick] ||= 0
         @facts[:players] = 'derived'
         Reduction.new(changed: true)
       end
@@ -322,6 +322,9 @@ module UnobotV2
         names = pairs.map { |pair| pair.first.downcase }
         if pairs.empty? || names.uniq.length != names.length
           return unsafe_reduction('malformed_card_count')
+        end
+        unless @players.empty? || pairs.map(&:first).sort == @players.sort
+          return unsafe_reduction('inconsistent_player_count')
         end
         @players = pairs.map(&:first) if @players.empty?
         @counts.merge!(pairs.to_h)
@@ -441,7 +444,11 @@ module UnobotV2
         @facts.merge!(current: 'derived', top_card: 'exact', game_state: 'derived',
                       stacked_cards: 'derived', already_picked: 'derived')
         @unsafe_reasons.delete('no_complete_state') if continuously_complete?
-        if inconsistent
+        if !continuously_complete?
+          uncertain!('no_complete_state')
+          Reduction.new(commands: current == own_nick ? resync_commands : [], changed: true,
+                        reason: 'exact player counts are required')
+        elsif inconsistent
           reason = @unsafe_reasons.last.to_s.tr('_', ' ')
           Reduction.new(commands: resync_commands, changed: true, reason: reason)
         else
@@ -536,7 +543,8 @@ module UnobotV2
       end
 
       def continuously_complete?
-        @hand && @top_card && @players.include?(own_nick) && @players.all? { |nick| @counts.key?(nick) }
+        @hand && @top_card && @players.include?(own_nick) &&
+          @players.all? { |nick| @counts.key?(nick) } && @counts[own_nick] == @hand.length
       end
 
       def mode_from_top(card, double: false)

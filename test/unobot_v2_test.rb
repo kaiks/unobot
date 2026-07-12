@@ -239,6 +239,23 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     refute @adapter.reducer.safe?
   end
 
+  def test_real_deal_start_without_card_count_fails_closed_and_requests_snapshot
+    @adapter.receive(event("Ok, created \x02\x0304U\x0309N\x0312O\x0308!\x0f game on #{CHANNEL}, say 'jo' to join in"))
+    @adapter.receive(event('Alice joins the game'))
+    @adapter.receive(event('Bob joins the game'))
+    @adapter.receive(event("#{RED_5} #{GREEN_3}", private: true, recipient: 'Alice'))
+
+    reduction = @adapter.receive(event("Alice's turn. Top card: #{RED_7}"))
+
+    assert_nil reduction.request
+    refute @adapter.reducer.safe?
+    assert_includes @adapter.reducer.unsafe_reasons, 'no_complete_state'
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
+
+    request = synchronize(hand: "#{RED_5} #{GREEN_3}", players: 'Alice:2,Bob:7')
+    assert_equal 7, request.other_players.first.card_count
+  end
+
   def test_real_transcript_fixture_replays_in_scope_order
     fixture_path = File.expand_path('fixtures/human_protocol_v1/transcripts.json', __dir__)
     events = JSON.parse(File.read(fixture_path)).fetch('normal_start_draw_pass')
