@@ -199,8 +199,12 @@ module UnobotV2
       end
 
       def rename!(new_nick)
+        request = @active_request
+        previous_game_id = @game_id
         @own_nick = new_nick.to_s.dup.freeze
         invalidate_session!(:nick_changed)
+        status(:session_cancelled, event: 'nick_changed', request: request,
+               game_id: previous_game_id, channel: channel) if previous_game_id
         @rename_recovery_deadline = now + @rename_recovery_timeout
         @rename_retry_at = now + @rename_retry_interval
         register!

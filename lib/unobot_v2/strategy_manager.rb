@@ -177,7 +177,12 @@ module UnobotV2
         created = Session.new(key: key, scope: scope, name: name, strategy: strategy).freeze
         # Start is bounded and serialized with publication. game_end/cancel can
         # interrupt a later blocked #decide, but can never start an orphan.
-        strategy.start_game(key) if strategy.respond_to?(:start_game)
+        begin
+          strategy.start_game(key) if strategy.respond_to?(:start_game)
+        rescue StandardError
+          discard_locked(strategy)
+          raise
+        end
         @sessions[key] = created
         started = true
         created
@@ -241,6 +246,14 @@ module UnobotV2
       elsif session.strategy.respond_to?(:shutdown)
         session.strategy.shutdown
       end
+    end
+
+    def discard_locked(strategy)
+      @idle.each_value { |strategies| strategies.delete(strategy) }
+      @all_instances.delete(strategy)
+      strategy.shutdown if strategy.respond_to?(:shutdown)
+    rescue StandardError
+      nil
     end
 
     def identity_for(request)

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
+require 'base64'
 require_relative '../lib/unobot_v2'
 
 class UnobotV2StrategyManagerTest < Minitest::Test
@@ -22,6 +23,17 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     def shutdown = @shutdown = true
     def shutdown? = @shutdown
     def retry_capable? = false
+  end
+
+  class FailingStartStrategy
+    attr_reader :shutdown_count
+
+    def initialize
+      @shutdown_count = 0
+    end
+
+    def start_game(_key) = raise('cannot start strategy')
+    def shutdown = @shutdown_count += 1
   end
 
   def machine_request(game: 'g1', transport: 'machine', generation: 1,
@@ -190,6 +202,25 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     manager&.shutdown
   end
 
+  def test_failed_game_start_discards_checked_out_instance_without_accumulating_sessions
+    created = []
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { FailingStartStrategy.new.tap { |strategy| created << strategy } }
+      }
+    )
+    2.times do
+      error = assert_raises(RuntimeError) { manager.decide(machine_request) }
+      assert_equal 'cannot start strategy', error.message
+      assert_empty manager.active_game_keys
+    end
+    assert_equal 2, created.length
+    assert created.all? { |strategy| strategy.shutdown_count == 1 }
+    assert_empty manager.instance_variable_get(:@all_instances)
+  ensure
+    manager&.shutdown
+  end
+
   def test_shutdown_cancels_selection_and_closes_all_created_strategies
     strategy = RecordingStrategy.new
     manager = UnobotV2::StrategyManager.new(selected: 'simple', factories: { simple: -> { strategy } })
@@ -349,6 +380,70 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     runtime&.stop
   end
 
+  def test_own_rename_cancels_every_old_channel_session_and_timeout_leaves_no_orphan
+    fixture = JSON.parse(File.read(File.expand_path('fixtures/host_machine_protocol_v1/frames.json', __dir__)))
+    created = []
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new.tap { |strategy| created << strategy } },
+        crushing: -> { RecordingStrategy.new }
+      }
+    )
+    sent = Queue.new
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: manager, channels: %w[#uno #other], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: ->(target, line) { sent << [target, line] }
+    ).start
+    2.times { sent.pop }
+
+    runtime.enqueue(machine_notice(fixture.fetch('registered_line')))
+    other_registration = fixture.fetch('registered_line')
+                                .sub('game=gameFixture1', 'game=gameOther1')
+                                .sub('channel=I3Vubw', "channel=#{Base64.urlsafe_encode64('#other', padding: false)}")
+    runtime.enqueue(machine_notice(other_registration))
+    fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    reframe(fixture.fetch('state_lines'), game_id: 'gameOther1').each do |line|
+      runtime.enqueue(machine_notice(line))
+    end
+    runtime.ingress.synchronize
+    ingress_errors = []
+    ingress_errors << runtime.ingress.errors.pop until runtime.ingress.errors.empty?
+    assert_equal %w[machine:#other:gameOther1 machine:#uno:gameFixture1], manager.active_game_keys,
+                 ingress_errors.map { |error| [error.code, error.message] }.inspect
+    sent.pop until sent.empty?
+
+    runtime.enqueue(UnobotV2::Machine::Event.new(
+      kind: :nick, old_nick: 'Alice', new_nick: 'Alice2'
+    ))
+    wait_for { manager.active_game_keys.empty? }
+    wait_for { sent.size >= 2 }
+    rename_lines = []
+    rename_lines << sent.pop until sent.empty?
+    assert_equal 2, rename_lines.count { |_target, line| line == '.uno machine register' }
+
+    new_registration = fixture.fetch('registered_line').sub('game=gameFixture1', 'game=gameFixture2')
+    runtime.enqueue(machine_notice(new_registration, recipient: 'Alice2'))
+    reframe(fixture.fetch('state_lines'), game_id: 'gameFixture2').each do |line|
+      runtime.enqueue(machine_notice(line, recipient: 'Alice2'))
+    end
+    wait_for { manager.active_game_keys == ['machine:#uno:gameFixture2'] }
+    assert_operator created.sum { |strategy| strategy.requests.length }, :>=, 3
+
+    other_adapter = runtime.adapter_for('#other')
+    other_adapter.instance_variable_set(:@rename_recovery_deadline, -1.0)
+    runtime.tick
+    wait_for { other_adapter.lifecycle == :unregistered }
+    assert_equal ['machine:#uno:gameFixture2'], manager.active_game_keys
+
+    reframe(fixture.fetch('event_lines'), game_id: 'gameFixture2').each do |line|
+      runtime.enqueue(machine_notice(line, recipient: 'Alice2'))
+    end
+    wait_for { manager.active_game_keys.empty? }
+    assert_predicate manager.select('crushing'), :success?
+  ensure
+    runtime&.stop
+  end
+
   private
 
   def human_snapshot(runtime)
@@ -366,8 +461,24 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     )
   end
 
-  def machine_notice(text)
-    UnobotV2::Machine::Event.new(source: 'Host', recipient: 'Alice', text: text)
+  def machine_notice(text, recipient: 'Alice')
+    UnobotV2::Machine::Event.new(source: 'Host', recipient: recipient, text: text)
+  end
+
+  def reframe(lines, game_id:)
+    messages = lines.map { |line| UnobotV2::Machine::Protocol.parse(line).value }.sort_by(&:part)
+    original = UnobotV2::Machine::Protocol.decode_payload(messages.map(&:data).join)
+    raise original.message if original.is_a?(UnobotV2::Machine::Protocol::Error)
+
+    payload = original.merge('game_id' => game_id)
+    encoded = Base64.urlsafe_encode64(Zlib::Deflate.deflate(JSON.generate(payload)), padding: false)
+    chunks = encoded.scan(/.{1,#{UnobotV2::Machine::Protocol::CHUNK_BYTES}}/)
+    kind = messages.first.kind.to_s.upcase
+    event = messages.first.event ? " event=#{messages.first.event}" : ''
+    chunks.each_with_index.map do |chunk, index|
+      "UNO_MACHINE_V1 #{kind} game=#{game_id} decision=#{messages.first.decision_id}" \
+        "#{event} part=#{index + 1}/#{chunks.length} data=#{chunk}"
+    end
   end
 
   def wait_for(timeout: 2)
