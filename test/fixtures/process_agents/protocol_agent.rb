@@ -41,6 +41,8 @@ while (line = $stdin.gets)
     puts JSON.generate('action' => 'draw')
   when 'invalid_action'
     puts JSON.generate('action' => 'play', 'card' => 'b9')
+  when 'working_directory'
+    puts JSON.generate('action' => (File.exist?('working-directory-marker') ? 'draw' : 'pass'))
   end
   $stdout.flush
 end

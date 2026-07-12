@@ -29,7 +29,7 @@ module UnobotV2
 
     attr_reader :name, :lifecycle
 
-    def initialize(argv:, name:, lifecycle: :per_game,
+    def initialize(argv:, name:, lifecycle: :per_game, chdir: nil,
                    startup_timeout: DEFAULT_STARTUP_TIMEOUT,
                    request_timeout: DEFAULT_REQUEST_TIMEOUT,
                    shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
@@ -37,6 +37,7 @@ module UnobotV2
                    stderr_tail_bytes: DEFAULT_STDERR_TAIL,
                    clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
       @argv = validate_argv(argv).freeze
+      @chdir = validate_chdir(chdir)
       @name = name.to_s.dup.freeze
       raise ArgumentError, 'agent name cannot be empty' if @name.empty?
 
@@ -83,7 +84,7 @@ module UnobotV2
       self
     end
 
-    def decide(request)
+    def decide(request, timeout: nil)
       @request_mutex.synchronize do
         token = @state_mutex.synchronize do
           raise Error.new(:shutdown, 'agent has been shut down') if @closed
@@ -92,7 +93,7 @@ module UnobotV2
           @generation += 1
         end
         start_process(expected_generation: token) unless running?
-        deadline = now + @request_timeout
+        deadline = now + (timeout ? positive_float(timeout, 'request timeout') : @request_timeout)
         reject_pending_stdout!
         write_request(request, token, deadline: deadline)
         raw = read_response(token, deadline: deadline)
@@ -183,6 +184,15 @@ module UnobotV2
       argv.map { |part| part.dup.freeze }
     end
 
+    def validate_chdir(path)
+      return nil if path.nil?
+
+      expanded = File.expand_path(String(path))
+      raise ArgumentError, 'agent working directory must be a readable directory' unless File.directory?(expanded) && File.readable?(expanded)
+
+      expanded.freeze
+    end
+
     def validate_command!
       executable = @argv.first
       unless executable_available?(executable)
@@ -229,7 +239,9 @@ module UnobotV2
           result = Queue.new
           starter = Thread.new do
             begin
-              result << [:ok, Open3.popen3(*@argv, pgroup: true)]
+              options = { pgroup: true }
+              options[:chdir] = @chdir if @chdir
+              result << [:ok, Open3.popen3(*@argv, **options)]
             rescue StandardError => error
               result << [:error, error]
             end

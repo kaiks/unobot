@@ -135,6 +135,28 @@ class UnobotV2ProcessAgentTest < Minitest::Test
       UnobotV2::ProcessAgent.new(argv: ['sh', '/definitely/missing.py'], name: 'bad')
     end
     assert_equal :missing_script, error.code
+    assert_raises(ArgumentError) do
+      UnobotV2::ProcessAgent.new(
+        argv: [RbConfig.ruby, FIXTURE, 'valid'], name: 'bad', chdir: '/definitely/missing'
+      )
+    end
+  end
+
+  def test_validated_working_directory_and_per_request_deadline
+    Dir.mktmpdir('unobot-agent') do |directory|
+      File.write(File.join(directory, 'working-directory-marker'), '')
+      strategy = agent('working_directory', chdir: directory, request_timeout: 5)
+      assert_equal 'draw', strategy.decide(request, timeout: 0.25).action
+      refute_includes strategy.diagnostics.keys, :chdir
+    end
+
+    strategy = agent('timeout', request_timeout: 5)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    error = assert_raises(UnobotV2::ProcessAgent::Error) do
+      strategy.decide(request, timeout: 0.05)
+    end
+    assert_equal :request_timeout, error.code
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1
   end
 
   def test_concurrent_decision_and_game_end_never_leave_a_child_or_late_action
