@@ -37,6 +37,85 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     end
   end
 
+  class NoopPrimary
+    attr_reader :shutdown_count
+
+    def initialize(action)
+      @action = action
+      @shutdown_count = 0
+    end
+
+    def decide(_request) = @action
+    def game_end_for(*) = :ended
+    def cancel_for(*) = :cancelled
+    def cancel_scope(*) = :cancelled
+
+    def shutdown
+      @shutdown_count += 1
+      self
+    end
+  end
+
+  class WedgedShadow
+    attr_reader :decision_started, :control_started, :shutdown_count
+
+    def initialize(action)
+      @action = action
+      @decision_gate = Queue.new
+      @control_gate = Queue.new
+      @decision_started = Queue.new
+      @control_started = Queue.new
+      @shutdown_count = 0
+    end
+
+    def decide(_request)
+      decision_started << true
+      @decision_gate.pop
+      @action
+    end
+
+    def game_end_for(*)
+      control_started << true
+      @control_gate.pop
+      :ended
+    end
+
+    def shutdown
+      @shutdown_count += 1
+      @decision_gate << true
+      @control_gate << true
+      self
+    end
+  end
+
+  class PreemptibleShadow
+    attr_reader :decision_started, :ended
+
+    def initialize(action)
+      @action = action
+      @gate = Queue.new
+      @decision_started = Queue.new
+      @ended = Queue.new
+    end
+
+    def decide(_request)
+      decision_started << true
+      @gate.pop
+      @action
+    end
+
+    def game_end_for(*)
+      ended << true
+      @gate << true
+      :ended
+    end
+
+    def shutdown
+      @gate << true
+      self
+    end
+  end
+
   def setup
     @request = UnobotV2::Canonical::DecisionRequest.new(
       your_id: 'Bot', hand: ['r5'], top_card: 'b7', game_state: 'normal',
@@ -96,8 +175,8 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     wrapper = build(primary, shadow, observations)
 
     wrapper.decide(@request)
-    assert_equal :ended, wrapper.game_end_for(@request, reason: 'winner')
     observations.pop(timeout: 1)
+    assert_equal :ended, wrapper.game_end_for(@request, reason: 'winner')
     assert_equal [:decide, @request], shadow.calls.pop(timeout: 1)
     assert_equal [:game_end_for, @request, 'winner'], shadow.calls.pop(timeout: 1)
     assert_equal [:decide, @request], primary.calls.pop(timeout: 1)
@@ -136,8 +215,59 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     assert_equal @draw, wrapper.decide(request('d2'))
     assert_equal :dropped, observations.pop(timeout: 1).status
     gate << true
-    assert_equal :ok, observations.pop(timeout: 1).status
+    invalidated = observations.pop(timeout: 1)
+    assert_equal :dropped, invalidated.status
+    assert_equal :shadow_decision_invalidated, invalidated.error_code
     assert_equal [:game_end_for, @request, 'saturated_end'], shadow.calls.pop(timeout: 1)
+  end
+
+  def test_twenty_thousand_repeated_controls_stay_bounded_and_shutdown_joins_wedged_workers
+    observations = Queue.new
+    primary = NoopPrimary.new(@draw)
+    shadow = WedgedShadow.new(@play)
+    wrapper = UnobotV2::ShadowStrategy.new(
+      primary: primary, shadow: shadow, queue_capacity: 1, shutdown_timeout: 0.1,
+      on_observation: ->(result) { observations << result }
+    )
+    @wrappers << wrapper
+
+    assert_equal @draw, wrapper.decide(@request)
+    shadow.decision_started.pop(timeout: 1) || flunk('shadow decision did not start')
+    wrapper.game_end_for(@request, reason: 'stress')
+    shadow.control_started.pop(timeout: 1) || flunk('shadow lifecycle did not start')
+    19_999.times { wrapper.game_end_for(@request, reason: 'stress') }
+
+    diagnostics = wrapper.diagnostics
+    assert_operator diagnostics.fetch(:queued_decisions), :<=, 1
+    assert_operator diagnostics.fetch(:queued_controls), :<=, 1
+    assert_operator wrapper.instance_variable_get(:@decision_queue).length, :<=, 1
+    assert_operator wrapper.instance_variable_get(:@control_queue).length, :<=, 1
+
+    wrapper.shutdown
+    refute wrapper.diagnostics.fetch(:decision_worker_alive)
+    refute wrapper.diagnostics.fetch(:control_worker_alive)
+    assert_equal 1, primary.shutdown_count
+    assert_operator shadow.shutdown_count, :>=, 1
+    assert_same wrapper, wrapper.shutdown
+    assert_equal 1, primary.shutdown_count
+  end
+
+  def test_lifecycle_preempts_a_wedged_shadow_decision_without_blocking_primary
+    observations = Queue.new
+    primary = NoopPrimary.new(@draw)
+    shadow = PreemptibleShadow.new(@play)
+    wrapper = build(primary, shadow, observations, queue_capacity: 1)
+
+    assert_equal @draw, wrapper.decide(@request)
+    shadow.decision_started.pop(timeout: 1) || flunk('shadow decision did not start')
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    assert_equal :ended, wrapper.game_end_for(@request, reason: 'preempt')
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.1
+    shadow.ended.pop(timeout: 1) || flunk('shadow lifecycle did not run')
+    result = observations.pop(timeout: 1)
+    assert_equal :dropped, result.status
+    assert_equal :shadow_decision_invalidated, result.error_code
+    wait_until { wrapper.diagnostics.fetch(:queued_decisions).zero? }
   end
 
   def test_configuration_accepts_only_canonical_shadow_strategies
