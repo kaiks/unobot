@@ -28,6 +28,7 @@ module UnobotV2
     class Reducer
       STATUS_RE = /\AUNO_STATUS_V1 phase=(waiting|active|ended) current=([^ ]+) top=([^ ]+) mode=([^ ]+) stacked_cards=(\d+) already_picked=([01]) players=(.*)\z/
       PRIVATE_RE = /\AUNO_STATUS_PRIVATE_V1 picked_card=([^ ]+)\z/
+      PRIVATE_DRAW_RE = /\AYou draw (\d+) cards?: /
       TURN_RE = /\A(?:(\S+) passes\. )?(\S+)'s turn\. Top card: (.+)\z/
       DRAW_RE = /\A(\S+) draws a card\.\z/
       JOIN_RE = /\A(\S+) joins the game\z/
@@ -57,9 +58,9 @@ module UnobotV2
       end
 
       def safe?
-        phase == 'active' && @current == own_nick && @hand && @top_card &&
-          @players.any? && @mode != 'unknown' && @unsafe_reasons.empty? &&
-          (!@already_picked || @picked_card)
+        !!(phase == 'active' && @current == own_nick && @hand && @top_card &&
+           @players.any? && @mode != 'unknown' && @unsafe_reasons.empty? &&
+           (!@already_picked || @picked_card))
       end
 
       def current_request
@@ -91,6 +92,15 @@ module UnobotV2
         uncertain!(reason)
       end
 
+      def invalidate!(reason)
+        @generation += 1
+        @status_seen = false
+        @private_status_seen = false
+        @status_anchor = nil
+        @last_turn_line = nil
+        uncertain!(reason)
+      end
+
       def resync_commands
         %w[us ca]
       end
@@ -117,8 +127,10 @@ module UnobotV2
         @double_pending = false
         @drawn_this_turn = {}
         @private_penalty_draw = {}
+        @private_draw_seen = false
         @last_turn_line = nil
         @last_status_signature = nil
+        @status_anchor = nil
         @pending_count_assertions = {}
       end
 
@@ -139,29 +151,50 @@ module UnobotV2
           return apply_private_status(match[1])
         end
 
+        if event.text.start_with?('You draw ')
+          return private_draw(event.text)
+        end
+
         cards = CardParser.hand(event.text)
         return Reduction.new if cards.empty?
 
-        if event.text.start_with?('You draw ')
-          @hand ||= []
-          @hand = (@hand + cards).sort.freeze
-          if cards.one?
-            @picked_card = cards.first
-            @already_picked = true
-          else
-            increment(own_nick, cards.length)
-            @private_penalty_draw[own_nick] = cards.length
-            @picked_card = nil
-            uncertain!('awaiting_penalty_pass')
-          end
-          @facts[:hand] = 'exact'
-          @facts[:picked_card] = 'exact'
-          @unsafe_reasons.delete('awaiting_private_draw') if cards.one?
-        else
-          @hand = cards.freeze
-          @facts[:hand] = 'exact'
-        end
+        @hand = cards.freeze
+        @facts[:hand] = 'exact'
         complete_resync_if_possible
+        reduction_with_request
+      end
+
+      def private_draw(text)
+        match = PRIVATE_DRAW_RE.match(text)
+        cards = CardParser.hand(text)
+        return unsafe_reduction('malformed_private_draw') unless match && match[1].to_i == cards.length
+        return unsafe_reduction('duplicate_private_draw') if @private_draw_seen
+        return unsafe_reduction('out_of_turn_private_draw') unless @current == own_nick
+        return unsafe_reduction('private_draw_without_hand') unless @hand
+
+        count = cards.length
+        if count == 1
+          unless @stacked.zero? && @drawn_this_turn[own_nick] && @already_picked
+            return unsafe_reduction('unexpected_private_draw')
+          end
+
+          @hand = (@hand + cards).sort.freeze
+          @picked_card = cards.first
+          @unsafe_reasons.delete('awaiting_private_draw')
+        else
+          unless @stacked.positive? && count == @stacked && !@drawn_this_turn[own_nick]
+            return unsafe_reduction('unexpected_private_penalty_draw')
+          end
+
+          @hand = (@hand + cards).sort.freeze
+          return unsafe_reduction('missing_player_count') unless increment(own_nick, count)
+          @private_penalty_draw[own_nick] = count
+          @picked_card = nil
+          uncertain!('awaiting_penalty_pass')
+        end
+        @private_draw_seen = true
+        @facts[:hand] = 'exact'
+        @facts[:picked_card] = 'exact'
         reduction_with_request
       end
 
@@ -194,9 +227,8 @@ module UnobotV2
           return Reduction.new
         end
         parsed = parse_players(players_text)
-        if parsed.empty? || (phase == 'active' && (current == '-' || top == '-'))
-          uncertain!('malformed_status')
-          return Reduction.new(commands: resync_commands, changed: true)
+        if parsed.nil? || parsed.empty? || (phase == 'active' && (current == '-' || top == '-'))
+          return unsafe_reduction('malformed_status')
         end
         @phase = phase
         @current = current == '-' ? nil : current
@@ -210,7 +242,9 @@ module UnobotV2
         @hand = nil
         @status_seen = true
         @last_status_signature = signature
+        @status_anchor = [@current, @top_card]
         @private_status_seen = !@already_picked || @current != own_nick
+        @private_draw_seen = false
         %i[phase current top_card game_state stacked_cards already_picked players].each { |fact| @facts[fact] = 'exact' }
         if phase != 'active'
           @unsafe_reasons = ['game_not_active']
@@ -307,13 +341,25 @@ module UnobotV2
         new_top = cards.first
         previous = @current
         was_double = @double_pending
+        if !passer && !was_double && @status_anchor == [current, new_top]
+          @status_anchor = nil
+          @last_turn_line = match[0]
+          return Reduction.new
+        end
+        @status_anchor = nil
+        if previous && !passer && !@rules.playable?(Canonical::Cards.base(new_top), @top_card, @mode)
+          return unsafe_reduction('illegal_observed_play')
+        end
         expected = expected_next(new_top, was_double) if previous && !passer
-        inconsistent = expected && expected != current
-        uncertain!('inconsistent_turn_order') if inconsistent
-        if previous && !passer && previous != current
-          decrement(previous, was_double ? 2 : 1)
-          remove_own_cards(Canonical::Cards.base(new_top), was_double ? 2 : 1) if previous == own_nick
-          inconsistent ||= !validate_count_assertion(previous)
+        return unsafe_reduction('inconsistent_turn_order') if expected && expected != current
+
+        inconsistent = false
+        if previous && !passer
+          inconsistent = true unless decrement(previous, was_double ? 2 : 1)
+          if previous == own_nick
+            inconsistent = true unless remove_own_cards(Canonical::Cards.base(new_top), was_double ? 2 : 1)
+          end
+          inconsistent = true unless validate_count_assertion(previous)
         elsif passer
           unless passer == previous || previous.nil?
             uncertain!('unexpected_passer')
@@ -326,7 +372,9 @@ module UnobotV2
                     else
                       @drawn_this_turn[passer] ? 0 : 1
                     end
-          increment(passer, penalty) if penalty.positive?
+          if penalty.positive? && !increment(passer, penalty)
+            return unsafe_reduction('missing_player_count')
+          end
         end
         @turn_number += 1
         @last_turn_line = match[0]
@@ -337,6 +385,7 @@ module UnobotV2
         @picked_card = nil
         @drawn_this_turn.clear
         @private_penalty_draw.clear
+        @private_draw_seen = false
         @unsafe_reasons.delete('awaiting_penalty_pass')
         @double_pending = false
         if passer
@@ -359,12 +408,16 @@ module UnobotV2
       end
 
       def drew(nick)
-        increment(nick, 1)
+        return unsafe_reduction('out_of_turn_draw') unless nick == @current
+        return unsafe_reduction('draw_during_war') if @stacked.positive?
+        return unsafe_reduction('duplicate_public_draw') if @drawn_this_turn[nick] || @already_picked
+        return unsafe_reduction('missing_player_count') unless increment(nick, 1)
+
         @drawn_this_turn[nick] = true
+        @already_picked = true
+        @picked_card = nil
+        @facts[:already_picked] = 'exact'
         if nick == own_nick
-          @already_picked = true
-          @picked_card = nil
-          @facts[:already_picked] = 'exact'
           uncertain!('awaiting_private_draw')
         end
         reduction_with_request
@@ -415,10 +468,16 @@ module UnobotV2
       end
 
       def parse_players(text)
-        text.split(',').filter_map do |entry|
+        entries = text.split(',', -1)
+        pairs = entries.map do |entry|
           match = /\A([^,:]+):(\d+)\z/.match(entry)
-          [match[1], match[2].to_i] if match
+          return nil unless match
+
+          [match[1], match[2].to_i]
         end
+        return nil unless pairs.map(&:first).uniq.length == pairs.length
+
+        pairs
       end
 
       def continuously_complete?
@@ -469,16 +528,27 @@ module UnobotV2
       end
 
       def decrement(nick, count)
-        return uncertain!('missing_player_count') unless @counts.key?(nick)
+        unless @counts.key?(nick)
+          uncertain!('missing_player_count')
+          return false
+        end
 
         @counts[nick] -= count
-        uncertain!('negative_player_count') if @counts[nick].negative?
+        if @counts[nick].negative?
+          uncertain!('negative_player_count')
+          return false
+        end
+        true
       end
 
       def increment(nick, count)
-        return uncertain!('missing_player_count') unless @counts.key?(nick)
+        unless @counts.key?(nick)
+          uncertain!('missing_player_count')
+          return false
+        end
 
         @counts[nick] += count
+        true
       end
 
       def validate_count_assertion(nick)
@@ -490,17 +560,21 @@ module UnobotV2
       end
 
       def remove_own_cards(card, count)
-        return unless @hand
+        return false unless @hand
 
         mutable = @hand.dup
         count.times do
           index = mutable.index(card)
-          return uncertain!('played_card_missing_from_hand') unless index
+          unless index
+            uncertain!('played_card_missing_from_hand')
+            return false
+          end
 
           mutable.delete_at(index)
         end
         @hand = mutable.freeze
         @facts[:hand] = 'derived'
+        true
       end
 
       def ordered_after_own
@@ -522,6 +596,11 @@ module UnobotV2
 
       def reduction_with_request
         Reduction.new(request: current_request, changed: true)
+      end
+
+      def unsafe_reduction(reason)
+        uncertain!(reason)
+        Reduction.new(commands: resync_commands, changed: true, reason: reason.tr('_', ' '))
       end
 
       def informational?(text)

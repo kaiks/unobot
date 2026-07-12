@@ -47,15 +47,28 @@ module UnobotV2
       def self.from(value)
         return value if value.is_a?(self)
 
+        unless value.is_a?(Hash)
+          raise ValidationError, 'action must be an object'
+        end
         hash = value.transform_keys(&:to_sym)
+        unknown = hash.keys - %i[action card wild_color double_play]
+        raise ValidationError, "unknown action fields: #{unknown.join(', ')}" unless unknown.empty?
+
         new(**hash.slice(:action, :card, :wild_color, :double_play))
+      rescue ValidationError
+        raise
+      rescue ArgumentError, TypeError, NoMethodError => error
+        raise ValidationError, "invalid action: #{error.message}"
       end
 
       def initialize(action:, card: nil, wild_color: nil, double_play: false)
         @action = String(action).freeze
         @card = card&.to_s&.dup&.freeze
         @wild_color = wild_color&.to_s&.dup&.freeze
-        @double_play = !!double_play
+        unless [true, false].include?(double_play)
+          raise ValidationError, 'double_play must be boolean'
+        end
+        @double_play = double_play
         validate!
         freeze
       end
@@ -123,12 +136,19 @@ module UnobotV2
                   :available_actions, :playable_cards, :metadata
 
       def self.from_protocol(value, metadata: {})
+        raise ValidationError, 'request must be an object' unless value.is_a?(Hash)
+
         envelope = value.transform_keys(&:to_sym)
         raise ValidationError, 'not a request_action envelope' unless envelope[:type] == 'request_action'
         raise ValidationError, 'unsupported protocol version' unless envelope[:protocol_version] == 1
 
-        state = envelope.fetch(:state).transform_keys(&:to_sym)
+        state_value = envelope.fetch(:state)
+        raise ValidationError, 'state must be an object' unless state_value.is_a?(Hash)
+
+        state = state_value.transform_keys(&:to_sym)
         new(**state, metadata: metadata)
+      rescue KeyError, TypeError, NoMethodError => error
+        raise ValidationError, "invalid request: #{error.message}"
       end
 
       def initialize(your_id:, hand:, top_card:, game_state:, stacked_cards:,
@@ -139,7 +159,10 @@ module UnobotV2
         @top_card = String(top_card).dup.freeze
         @game_state = String(game_state).dup.freeze
         @stacked_cards = Integer(stacked_cards)
-        @already_picked = !!already_picked
+        unless [true, false].include?(already_picked)
+          raise ValidationError, 'already_picked must be boolean'
+        end
+        @already_picked = already_picked
         @picked_card = picked_card&.to_s&.dup&.freeze
         @other_players = other_players.map do |player|
           player.is_a?(PlayerCount) ? player : PlayerCount.new(**player.transform_keys(&:to_sym))
