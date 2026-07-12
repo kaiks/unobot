@@ -32,19 +32,19 @@ module UnobotV2
       end
     end
 
-    attr_reader :runtime, :errors, :mode
+    attr_reader :runtime, :errors
 
     def initialize(bot:, strategy:, env: ENV, channels: nil, own_nick: nil,
                    host_nicks: nil, queue_capacity: 1_024, tick_interval: 1.0,
                    control_timeout: 5.0, runtime: nil)
       @bot = bot
       @env = env
-      @mode = Configuration.messaging(env)
+      configured_mode = Configuration.messaging(env)
       @channels = Array(channels || bot.config.channels).map { |value| value.to_s.downcase }.uniq.freeze
       @own_nick = (own_nick || bot.nick).to_s
       @host_nicks = Array(host_nicks || bot.config.host_nicks).map(&:to_s).freeze
       fallback = Configuration.fallback_enabled?(env)
-      if mode == 'human' && @channels.length != 1
+      if configured_mode == 'human' && @channels.length != 1
         raise Configuration::Error, 'human v2 messaging requires exactly one channel for private notice correlation'
       end
       if fallback && @channels.length != 1
@@ -56,6 +56,10 @@ module UnobotV2
         host_nicks: @host_nicks, transport: method(:transport), env: env,
         queue_capacity: queue_capacity, on_error: method(:runtime_error)
       )
+      if @runtime.mode != configured_mode
+        raise Configuration::Error,
+              "injected runtime mode #{@runtime.mode.inspect} does not match UNO_MESSAGING #{configured_mode.inspect}"
+      end
       @queue = SizedQueue.new(queue_capacity)
       @errors = Queue.new
       @tick_interval = Float(tick_interval)
@@ -76,6 +80,8 @@ module UnobotV2
       @timer = nil
       @mutex = Mutex.new
     end
+
+    def mode = runtime.mode
 
     def attach!
       @mutex.synchronize do

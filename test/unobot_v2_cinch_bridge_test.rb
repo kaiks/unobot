@@ -249,6 +249,31 @@ class UnobotV2CinchBridgeTest < Minitest::Test
     refute sessions.key?('#other')
   end
 
+  def test_live_machine_to_human_fallback_routes_subsequent_callbacks_to_fresh_human_ingress
+    @bridge = UnobotV2::CinchBridge.new(
+      bot: @bot, strategy: @strategy,
+      env: { 'UNO_MESSAGING' => 'machine', 'UNO_MACHINE_HUMAN_FALLBACK' => 'true' },
+      tick_interval: 0.01
+    ).attach!
+    @bridge.on_join(fake_message(command: 'JOIN', source: 'Alice', channel: '#uno'))
+    assert_equal '.uno machine register', pop(@bot.channel_targets['#uno'].messages)[0]
+
+    transition = @bridge.runtime.transition_to('human')
+    assert_predicate transition, :success?
+    assert_equal 'human', @bridge.mode
+    assert_equal ['.uno machine unregister', 'us', 'ca'],
+                 3.times.map { pop(@bot.channel_targets['#uno'].messages)[0] }
+
+    private_notice('UNO_STATUS_V1 phase=active current=Alice top=r7 mode=normal ' \
+                   'stacked_cards=0 already_picked=0 players=Alice:3,Bob:2,Carol:1')
+    private_notice('UNO_STATUS_PRIVATE_V1 picked_card=-')
+    private_notice("\x034[2] \x0312[5] \x0313[WD4]")
+    request, strategy_thread = pop(@seen)
+    assert_equal 'human', request.metadata[:transport]
+    refute_same @callback_thread, strategy_thread
+    assert_equal 'pe', pop(@bot.channel_targets['#uno'].messages)[0]
+  end
+
   private
 
   def build_bridge(mode)
