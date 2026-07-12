@@ -44,8 +44,8 @@ RUN gem install bundler -v 2.3.7 --no-document && \
 
 COPY deploy/requirements-neural.lock /tmp/requirements-neural.lock
 RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir --upgrade pip==25.1.1 && \
     /opt/venv/bin/pip install --no-cache-dir \
+      --require-hashes \
       --extra-index-url https://download.pytorch.org/whl/cpu \
       -r /tmp/requirements-neural.lock && \
     /opt/venv/bin/pip check && \
