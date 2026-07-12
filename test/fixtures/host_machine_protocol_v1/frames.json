@@ -1,0 +1,16 @@
+{
+  "source_commit": "20b3a349709c2e96828b5697e23caa2467b3738c",
+  "state_lines": [
+    "UNO_MACHINE_V1 STATE game=gameFixture1 decision=decisionFixture1 part=1/3 data=eJx1UMFOwzAM_Refe6ATCKm3MYHgwDjBBaHITc0WkTXFSTeqqv-OnXUTQnCJ_PRent_zCB2HFGzwUMHz-sk8Llf3D-tb81JCcebMnji60EJVFpCGjkTM9NlTTAZtUqaA",
+    "UNO_MACHINE_V1 STATE game=gameFixture1 decision=decisionFixture1 part=2/3 data=De7IuEYone7cV-qZ1KUh6_T3kTyhHwImjGouw8bFxKiOJg6tzWTeA9X47-Y_Y8aEifTXEHo-rl56Z0n0W2wFvgIvBNRX8hyaS3iTaqEzFlm1fH2qNBtBG3iHHrKz_aAm",
+    "UNO_MACHINE_V1 STATE game=gameFixture1 decision=decisionFixture1 part=3/3 data=KyNUFwWglwrNYDqnBFTv6CNJLnfWQdX23hcQ0pbYdB4HiSoZRsjJbkItxio0NvSttF1MxcytkIP_xZaTpMU9Oo-1p_kS6gdqrTdnPGgjhVkyh51L577TNH0DPaqt5Q"
+  ],
+  "action_line": "UNO_MACHINE_V1 ACTION game=gameFixture1 decision=decisionFixture1 data=eyJwcm90b2NvbCI6IlVOT19NQUNISU5FX1YxIiwicHJvdG9jb2xfdmVyc2lvbiI6MSwiY29ycmVsYXRpb24iOiJUQjM0ZFFTZ3MwaXpMMjdUIiwiYWN0aW9uIjp7ImFjdGlvbiI6InBsYXkiLCJjYXJkIjoid2Q0Iiwid2lsZF9jb2xvciI6InJlZCIsImRvdWJsZV9wbGF5Ijp0cnVlfX0",
+  "registered_line": "UNO_MACHINE_V1 REGISTERED game=gameFixture1 channel=I3Vubw",
+  "ack_line": "UNO_MACHINE_V1 ACK game=gameFixture1 decision=decisionFixture1 status=ok action=play",
+  "error_line": "UNO_MACHINE_V1 ERROR game=gameFixture1 decision=decisionFixture1 code=card_not_playable retry=1",
+  "event_lines": [
+    "UNO_MACHINE_V1 EVENT game=gameFixture1 decision=decisionFixture1 event=game_ended part=1/2 data=eJxNjDELwjAUhP_Lm7t0zVZEqYN10jWE5JAHMQkxtpbS_95Xq-J03H0fN1HKsUQbPSm6dGd9anbtsdvra03Vj-ke-cExkKorKmOCyOgRijhbKrqZOzSCg5PxXdh95gO_",
+    "UNO_MACHINE_V1 EVENT game=gameFixture1 decision=decisionFixture1 event=game_ended part=2/2 data=yjNjfXSwvD5t8Nv-hGRGH43AiQYOAVm0xrMFzfMCyT862Q"
+  ]
+}
