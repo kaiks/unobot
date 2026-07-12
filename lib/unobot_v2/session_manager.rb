@@ -10,6 +10,16 @@ module UnobotV2
         freeze
       end
     end
+    Control = Struct.new(:operation, :completion, keyword_init: true) do
+      def initialize(**values)
+        super
+        freeze
+      end
+    end
+    ControlResult = Struct.new(:code, :value, :message, keyword_init: true) do
+      def success? = code == :ok
+      def error? = !success?
+    end
 
     attr_reader :consumer
 
@@ -54,6 +64,21 @@ module UnobotV2
       adapter
     end
 
+    def execute(channel: nil, invalidate: false, &operation)
+      raise ArgumentError, 'control operation is required' unless operation
+
+      invalidate_channel(channel) if invalidate && channel
+      return control_call(operation) if consumer.worker_thread?
+
+      completion = Queue.new
+      consumer.push(Control.new(operation: operation, completion: completion), nonblock: false)
+      completion.pop
+    end
+
+    def synchronize
+      execute { true }
+    end
+
     def remove(channel)
       normalized = normalize(channel)
       @mutex.synchronize do
@@ -67,6 +92,10 @@ module UnobotV2
 
     def process(envelope)
       handle_overflows
+      if envelope.is_a?(Control)
+        envelope.completion << control_call(envelope.operation)
+        return
+      end
       channel = normalize(envelope.event.channel)
       return unless current_epoch?(channel, envelope.epoch)
 
@@ -98,6 +127,17 @@ module UnobotV2
 
     def current_epoch?(channel, epoch)
       @mutex.synchronize { @epochs[channel] == epoch }
+    end
+
+    def invalidate_channel(channel)
+      normalized = normalize(channel)
+      @mutex.synchronize { @epochs[normalized] += 1 }
+    end
+
+    def control_call(operation)
+      ControlResult.new(code: :ok, value: operation.call)
+    rescue StandardError => error
+      ControlResult.new(code: :control_error, message: error.message)
     end
 
     def normalize(channel)

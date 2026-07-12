@@ -219,7 +219,7 @@ class UnobotV2MachineAdapterTest < Minitest::Test
   def register(adapter = @adapter, line = @fixture.fetch('registered_line'))
     assert_predicate adapter.start, :success?
     assert_equal ['#uno', '.uno machine register'], @sent.last.first(2)
-    result = adapter.receive(UnobotV2::Machine::Protocol.parse(line).value)
+    result = adapter.receive(UnobotV2::Machine::Protocol.parse(line).value, source: 'Host')
     assert_predicate result, :success?
     assert_equal :registered, adapter.lifecycle
   end
@@ -396,6 +396,28 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal :registering, @adapter.lifecycle
   end
 
+  def test_retryable_error_requires_a_real_submission_in_awaiting_ack_lifecycle
+    register
+    request = deliver_state.request
+    error = "UNO_MACHINE_V1 ERROR game=gameFixture1 decision=#{request.decision_id} " \
+            'code=card_not_playable retry=1'
+    result = @adapter.receive(UnobotV2::Machine::Protocol.parse(error).value)
+    assert_equal :invalid_retry, result.code
+    assert_equal :registering, @adapter.lifecycle
+    assert_equal '.uno machine register', @sent.last[1]
+  end
+
+  def test_strategy_exception_is_structured_and_recovers_with_fresh_registration
+    adapter = build_adapter(on_request: ->(_request) { raise 'strategy boom' })
+    register(adapter)
+    result = deliver_state(adapter)
+    assert_equal :strategy_error, result.code
+    assert_equal :registering, adapter.lifecycle
+    assert_nil adapter.active_request
+    assert_equal '.uno machine register', @sent.last[1]
+    assert_equal 'strategy boom', adapter.callback_errors.pop.message
+  end
+
   def deliver_payload(payload)
     encoded = Base64.urlsafe_encode64(Zlib::Deflate.deflate(JSON.generate(payload)), padding: false)
     chunks = encoded.scan(/.{1,128}/)
@@ -418,11 +440,12 @@ class UnobotV2MachineIngressTest < Minitest::Test
     @producer = Thread.current
   end
 
-  def adapter(channel, on_request: ->(request) { @requests << [request, Thread.current] })
+  def adapter(channel, on_request: ->(request) { @requests << [request, Thread.current] },
+              host_nicks: ['Host'], on_status: nil)
     UnobotV2::Machine::Adapter.new(
-      channel: channel, own_nick: 'Alice', host_nicks: ['Host'],
+      channel: channel, own_nick: 'Alice', host_nicks: host_nicks,
       transport: ->(target, line) { @sent << [target, line, Thread.current] },
-      on_request: on_request
+      on_request: on_request, on_status: on_status
     )
   end
 
@@ -527,12 +550,12 @@ class UnobotV2MachineIngressTest < Minitest::Test
     started = Queue.new
     release = Queue.new
     uno = adapter('#uno')
-    uno.define_singleton_method(:receive) do |input|
+    uno.define_singleton_method(:receive) do |input, **options|
       if input.is_a?(UnobotV2::Machine::Protocol::Message) && input.kind == :ack
         started << true
         release.pop
       end
-      super(input)
+      super(input, **options)
     end
     ingress = UnobotV2::Machine::Ingress.new(
       adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: ['Host'],
@@ -581,6 +604,81 @@ class UnobotV2MachineIngressTest < Minitest::Test
     ingress.stop
   end
 
+  def test_unrelated_part_quit_and_kick_do_not_resync_our_session
+    uno = adapter('#uno')
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: ['Host']
+    ).start
+    @sent.pop
+    ingress.enqueue(notice(@fixture.fetch('registered_line')))
+    wait_until { uno.game_id }
+
+    ingress.enqueue(notice('', kind: :part, source: 'Bob', affected_nick: 'Bob', channel: '#uno'))
+    ingress.enqueue(notice('', kind: :quit, source: 'Carol', affected_nick: 'Carol'))
+    ingress.enqueue(notice('', kind: :kick, source: 'Op', recipient: 'Bob', affected_nick: 'Bob', channel: '#uno'))
+    ingress.synchronize
+    assert_equal :registered, uno.lifecycle
+    assert_equal 'gameFixture1', uno.game_id
+    assert @sent.empty?, 'unrelated lifecycle must not emit registration traffic'
+
+    ingress.enqueue(notice('', kind: :kick, source: 'Op', recipient: 'Alice', channel: '#uno'))
+    ingress.synchronize
+    assert_equal :registering, uno.lifecycle
+    assert_equal '.uno machine register', @sent.pop[1]
+    ingress.stop
+  end
+
+  def test_bound_registration_host_alias_owns_frames_actions_and_trusted_nick_change
+    uno = adapter('#uno', host_nicks: %w[Host Host2 Host3])
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: %w[Host Host2 Host3],
+      on_error: ->(error) { @errors << error }
+    ).start
+    @sent.pop
+    ingress.enqueue(notice(@fixture.fetch('registered_line'), source: 'Host2'))
+    wait_until { uno.game_id }
+    assert_equal 'Host2', uno.host_nick
+
+    ingress.enqueue(notice(@fixture.fetch('state_lines').first, source: 'Host'))
+    ingress.synchronize
+    assert_equal :host_mismatch, @errors.pop.code
+    assert_empty uno.frame_buffer.frames
+
+    @fixture.fetch('state_lines').each { |line| ingress.enqueue(notice(line, source: 'Host2')) }
+    request, = @requests.pop
+    result = uno.submit({ action: 'draw' }, decision_id: request.decision_id)
+    assert_predicate result, :success?
+    assert_equal 'Host2', @sent.pop[0]
+
+    ingress.enqueue(notice('', kind: :nick, old_nick: 'Host2', new_nick: 'Host3'))
+    ingress.synchronize
+    assert_equal 'Host3', uno.host_nick
+    ingress.enqueue(notice(@fixture.fetch('ack_line'), source: 'Host2'))
+    ingress.synchronize
+    assert_equal :host_mismatch, @errors.pop.code
+    ingress.stop
+  end
+
+  def test_error_and_status_callback_exceptions_do_not_kill_ordered_ingress
+    uno = adapter('#uno', on_status: ->(_status) { raise 'status callback boom' })
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: ['Host'],
+      on_error: ->(_error) { raise 'error callback boom' }
+    ).start
+    @sent.pop
+    ingress.enqueue(notice('broken'))
+    ingress.enqueue(notice(@fixture.fetch('registered_line')))
+    ingress.synchronize
+    assert_predicate ingress.consumer, :alive?
+    assert_equal 'gameFixture1', uno.game_id
+    assert_equal 'status callback boom', uno.callback_errors.pop.message
+    error_codes = []
+    error_codes << ingress.errors.pop.code until ingress.errors.empty?
+    assert_includes error_codes, :unsupported_protocol
+    assert_includes error_codes, :error_callback_failed
+    ingress.stop
+  end
+
 
   private
 
@@ -608,7 +706,7 @@ class UnobotV2MessagingContractTest < Minitest::Test
       transport: ->(_target, _line) {}, on_request: ->(request) { machine_requests << request }
     )
     machine.start
-    machine.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value)
+    machine.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value, source: 'Host')
     @fixture.fetch('state_lines').each do |line|
       machine.receive(UnobotV2::Machine::Protocol.parse(line).value)
     end
@@ -668,7 +766,7 @@ class UnobotV2MessagingContractTest < Minitest::Test
       end
     )
     machine.start
-    machine.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value)
+    machine.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value, source: 'Host')
     @fixture.fetch('state_lines').each do |line|
       machine.receive(UnobotV2::Machine::Protocol.parse(line).value)
     end
@@ -733,7 +831,9 @@ class UnobotV2RuntimeSelectionTest < Minitest::Test
     human.stop
 
     machine = runtime('machine').start
-    assert_equal '.uno machine register', @sent.pop[1]
+    registration = @sent.pop
+    assert_equal '.uno machine register', registration[1]
+    refute_same @producer, registration[2]
     machine.enqueue(machine_notice(@fixture.fetch('registered_line')))
     @fixture.fetch('state_lines').each { |line| machine.enqueue(machine_notice(line)) }
     wait_for { @submitted.size == 1 }
@@ -743,6 +843,60 @@ class UnobotV2RuntimeSelectionTest < Minitest::Test
     refute_same @producer, @seen.last[1]
     assert_equal @seen[-2][0].state_h, @seen[-1][0].state_h
     machine.stop
+  end
+
+  def test_machine_start_and_graceful_stop_output_are_serialized_on_worker
+    machine = runtime('machine').start
+    registration = @sent.pop
+    assert_equal '.uno machine register', registration[1]
+    refute_same @producer, registration[2]
+    machine.stop
+    unregister = @sent.pop
+    assert_equal '.uno machine unregister', unregister[1]
+    refute_same @producer, unregister[2]
+    assert_same registration[2], unregister[2]
+  end
+
+  def test_blocked_strategy_is_epoch_invalidated_before_machine_to_human_fallback
+    started = Queue.new
+    release = Queue.new
+    blocking = Class.new(UnobotV2::Strategy) do
+      define_method(:initialize) { |started_queue, release_queue| @started = started_queue; @release = release_queue }
+      define_method(:decide) do |_request|
+        @started << true
+        @release.pop
+        UnobotV2::Canonical::Action.new(action: 'draw')
+      end
+    end.new(started, release)
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: blocking, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: method(:send_line), fallback_enabled: true,
+      on_submission: ->(result, request) { @submitted << [result, request] }
+    ).start
+    @sent.pop
+    runtime.enqueue(machine_notice(@fixture.fetch('registered_line')))
+    @fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    started.pop
+
+    transition_result = Queue.new
+    operator = Thread.new { transition_result << runtime.transition_to('human') }
+    wait_for { operator.status == 'sleep' }
+    release << true
+    result = transition_result.pop
+    operator.join
+    assert_predicate result, :success?
+    submission, = @submitted.pop
+    assert_equal :invalidated_decision, submission.code
+
+    outputs = []
+    outputs << @sent.pop until @sent.empty?
+    refute outputs.any? { |_target, line, _thread| line.include?(' ACTION ') }
+    assert_equal ['.uno machine unregister', 'us', 'ca'], outputs.map { |entry| entry[1] }
+    outputs.each do |_target, _line, thread|
+      refute_same @producer, thread
+      refute_same operator, thread
+    end
+    runtime.stop
   end
 
   def test_controlled_machine_to_human_fallback_never_merges_partial_state

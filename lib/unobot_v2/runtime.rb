@@ -15,7 +15,7 @@ module UnobotV2
       def restart_required? = code == :restart_required
     end
 
-    attr_reader :mode, :ingress, :last_submission
+    attr_reader :mode, :ingress, :last_submission, :callback_errors
 
     def self.from_env(strategy:, channels:, own_nick:, host_nicks:, transport:,
                       env: ENV, **options)
@@ -44,6 +44,7 @@ module UnobotV2
       @fallback_enabled = !!fallback_enabled
       @on_error = on_error
       @on_submission = on_submission
+      @callback_errors = Queue.new
       install_ingress
     end
 
@@ -90,17 +91,21 @@ module UnobotV2
                               message: 'machine to human fallback is disabled', mode: mode)
       end
 
-      failures = ingress.adapters.values.map(&:unregister!).select(&:error?)
-      unless failures.empty?
+      prepared = ingress.prepare_fallback!
+      unless prepared.success? && prepared.value
         return Transition.new(code: :transport_unavailable,
                               message: 'machine unregister could not be delivered', mode: mode)
       end
 
-      ingress.stop
+      ingress.stop(graceful: false)
       @mode = 'human'
       install_ingress
       ingress.start
-      @channels.each { |channel| adapter_for(channel).resync!('machine_fallback') }
+      @channels.each do |channel|
+        ingress.execute(channel: channel, invalidate: true) do
+          adapter_for(channel).resync!('machine_fallback')
+        end
+      end
       Transition.new(code: :ok, message: 'fresh human snapshot required', mode: mode)
     end
 
@@ -145,7 +150,11 @@ module UnobotV2
     def dispatch(adapter, request)
       action = @strategy.decide(request)
       @last_submission = adapter.submit(action, decision_id: request.decision_id)
-      @on_submission&.call(@last_submission, request)
+      begin
+        @on_submission&.call(@last_submission, request)
+      rescue StandardError => error
+        @callback_errors << error
+      end
       @last_submission
     end
   end

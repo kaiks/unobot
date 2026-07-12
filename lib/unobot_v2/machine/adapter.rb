@@ -25,7 +25,7 @@ module UnobotV2
       DEFAULT_ACK_TIMEOUT = 30.0
 
       attr_reader :channel, :own_nick, :host_nick, :game_id, :lifecycle,
-                  :active_request, :last_error, :frame_buffer
+                  :active_request, :last_error, :frame_buffer, :callback_errors
       attr_writer :lifecycle_token, :token_validator
 
       def initialize(channel:, own_nick:, host_nicks:, transport:, on_request: nil,
@@ -50,6 +50,7 @@ module UnobotV2
         @submitted_decision_id = nil
         @active_lifecycle_token = nil
         @connected = true
+        @callback_errors = Queue.new
       end
 
       def start
@@ -70,13 +71,15 @@ module UnobotV2
 
       def registering? = lifecycle == :registering
       def registered? = !game_id.nil? && %i[registered active awaiting_ack].include?(lifecycle)
+      def connected? = @connected
+      def can_unregister? = connected? && !%i[unregistered stopped disconnected].include?(lifecycle)
 
-      def receive(input)
+      def receive(input, source: nil)
         message = input.is_a?(Protocol::Message) ? input : parse_input(input)
         return message if message.is_a?(Result)
 
         case message.kind
-        when :registered then receive_registered(message)
+        when :registered then receive_registered(message, source)
         when :state, :event then receive_chunk(message)
         when :ack then receive_ack(message)
         when :error then receive_error(message)
@@ -157,6 +160,20 @@ module UnobotV2
         result
       end
 
+      def accepts_source?(source)
+        host_nick.to_s.casecmp?(source.to_s)
+      end
+
+      def host_renamed!(old_nick, new_nick)
+        return success unless host_nick.to_s.casecmp?(old_nick.to_s)
+        unless @host_nicks.include?(new_nick.to_s.downcase)
+          return fail_closed!(:host_changed, 'bound host changed to an unconfigured nick', reregister: false)
+        end
+
+        @host_nick = new_nick.to_s.dup.freeze
+        success(event: :host_renamed)
+      end
+
       def stop!
         invalidate_session!(:stopped)
         @lifecycle = :stopped
@@ -172,10 +189,13 @@ module UnobotV2
         parsed.value
       end
 
-      def receive_registered(message)
+      def receive_registered(message, source)
         return failure(:unexpected_registration, 'no registration is pending') unless registering?
         return failure(:channel_mismatch, 'registration belongs to another channel') unless message.channel == channel
+        return failure(:missing_host_source, 'registration source is required') if source.to_s.empty?
+        return failure(:unauthorized_host, 'registration source is not configured') unless @host_nicks.include?(source.to_s.downcase)
 
+        @host_nick = source.to_s.dup.freeze
         @game_id = message.game_id
         @lifecycle = :registered
         @last_error = nil
@@ -224,7 +244,12 @@ module UnobotV2
         @active_lifecycle_token = @lifecycle_token
         @lifecycle = :active
         status(:action_required, request: request)
-        @on_request&.call(request)
+        begin
+          @on_request&.call(request)
+        rescue StandardError => error
+          @callback_errors << error
+          return fail_closed!(:strategy_error, error.message, reregister: true)
+        end
         success(request: request)
       rescue Canonical::ValidationError, KeyError => error
         fail_closed!(:invalid_state, error.message, reregister: true)
@@ -251,7 +276,8 @@ module UnobotV2
 
         @last_error = message.code.freeze
         if message.retryable
-          unless active_request && message.decision_id == active_request.decision_id
+          unless lifecycle == :awaiting_ack && @submitted_decision_id == message.decision_id &&
+                 active_request && message.decision_id == active_request.decision_id
             return fail_closed!(:invalid_retry, 'retryable error has no active decision', reregister: true)
           end
           @submitted_decision_id = nil
@@ -357,6 +383,9 @@ module UnobotV2
 
       def status(code, **values)
         @on_status&.call(Result.new(code: code, **values))
+      rescue StandardError => error
+        @callback_errors << error
+        nil
       end
 
       def success(**values)

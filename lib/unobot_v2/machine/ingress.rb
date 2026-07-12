@@ -13,6 +13,16 @@ module UnobotV2
           freeze
         end
       end
+      Control = Struct.new(:operation, :completion, keyword_init: true) do
+        def initialize(**values)
+          super
+          freeze
+        end
+      end
+      ControlResult = Struct.new(:code, :value, :message, keyword_init: true) do
+        def success? = code == :ok
+        def error? = !success?
+      end
 
       attr_reader :consumer, :adapters, :errors
 
@@ -37,18 +47,54 @@ module UnobotV2
         return self if @started
 
         consumer.start
-        adapters.each_value(&:start)
         @started = true
+        execute { adapters.values.map(&:start) }
         self
       end
 
-      def stop
+      def stop(graceful: true)
         return self unless @started
 
+        execute(invalidate: true) do
+          if graceful
+            adapters.each_value { |adapter| adapter.unregister! if adapter.can_unregister? }
+          end
+          adapters.each_value(&:stop!)
+          @game_sessions.clear
+        end
         consumer.stop
-        adapters.each_value(&:stop!)
         @started = false
         self
+      end
+
+      def prepare_fallback!
+        execute(invalidate: true) do
+          results = adapters.values.map { |adapter| adapter.unregister! if adapter.can_unregister? }.compact
+          failures = results.select(&:error?)
+          if failures.empty?
+            adapters.each_value(&:stop!)
+            @game_sessions.clear
+            true
+          else
+            false
+          end
+        end
+      end
+
+      def synchronize
+        execute { true }
+      end
+
+      def execute(invalidate: false, &operation)
+        raise ArgumentError, 'control operation is required' unless operation
+
+        invalidate_epoch! if invalidate
+        return control_call(operation) if consumer.worker_thread?
+
+        completion = Queue.new
+        control = Control.new(operation: operation, completion: completion)
+        consumer.push(control, nonblock: false)
+        completion.pop
       end
 
       def tick
@@ -77,6 +123,10 @@ module UnobotV2
 
       def process(envelope)
         handle_overflow
+        if envelope.is_a?(Control)
+          envelope.completion << control_call(envelope.operation)
+          return
+        end
         return unless current_epoch?(envelope.epoch)
 
         event = envelope.event
@@ -88,12 +138,12 @@ module UnobotV2
         parsed = Protocol.parse(event.text)
         return report(parsed.error.code, parsed.error.message) if parsed.failure?
 
-        route(parsed.value)
+        route(parsed.value, source: event.source)
       ensure
         handle_overflow
       end
 
-      def route(message)
+      def route(message, source:)
         if message.kind == :registered
           prior = @game_sessions[message.game_id]
           candidate = registration_adapter(message)
@@ -105,9 +155,12 @@ module UnobotV2
                   else @game_sessions[message.game_id]
                   end
         return report(:unroutable_frame, message.kind.to_s) unless adapter
+        if message.kind != :registered && message.game_id != '-' && !adapter.accepts_source?(source)
+          return report(:host_mismatch, source.to_s)
+        end
 
         adapter.lifecycle_token = @mutex.synchronize { @epoch }
-        result = adapter.receive(message)
+        result = adapter.receive(message, source: source)
         if message.kind == :registered && result.success?
           @game_sessions[message.game_id] = adapter
         end
@@ -139,12 +192,18 @@ module UnobotV2
         when :reconnect
           selected.each(&:reconnect!)
         when :nick
-          return unless event.old_nick.to_s.casecmp?(@own_nick)
-
-          @own_nick = event.new_nick.to_s
-          selected.each { |adapter| adapter.rename!(@own_nick) }
-          @game_sessions.clear
+          if event.old_nick.to_s.casecmp?(@own_nick)
+            @own_nick = event.new_nick.to_s
+            selected.each { |adapter| adapter.rename!(@own_nick) }
+            @game_sessions.clear
+          else
+            selected.each { |adapter| adapter.host_renamed!(event.old_nick, event.new_nick) }
+            cleanup_routes
+          end
         when :part, :quit, :kick
+          affected = event.affected_nick || (event.kind == :kick ? event.recipient : event.source)
+          return unless affected.to_s.casecmp?(@own_nick)
+
           selected.each { |adapter| adapter.resync!(event.kind.to_s) }
           cleanup_routes
         else
@@ -180,6 +239,22 @@ module UnobotV2
         end
       end
 
+      def invalidate_epoch!
+        epoch = @mutex.synchronize do
+          @epoch += 1
+          @epoch
+        end
+        adapters.each_value { |adapter| adapter.lifecycle_token = epoch }
+        epoch
+      end
+
+      def control_call(operation)
+        ControlResult.new(code: :ok, value: operation.call)
+      rescue StandardError => error
+        report(:control_error, error.message)
+        ControlResult.new(code: :control_error, message: error.message)
+      end
+
       def current_epoch?(epoch)
         @mutex.synchronize { @epoch == epoch }
       end
@@ -195,7 +270,11 @@ module UnobotV2
       def report(code, message)
         error = Protocol::Error.new(code: code, message: message)
         errors << error
-        @on_error&.call(error)
+        begin
+          @on_error&.call(error)
+        rescue StandardError => callback_error
+          errors << Protocol::Error.new(code: :error_callback_failed, message: callback_error.message)
+        end
         error
       end
 

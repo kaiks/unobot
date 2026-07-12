@@ -56,6 +56,10 @@ module UnobotV2
       @mutex.synchronize { !!@thread&.alive? }
     end
 
+    def worker_thread?
+      @mutex.synchronize { @thread == Thread.current }
+    end
+
     private
 
     def consume
@@ -67,7 +71,11 @@ module UnobotV2
           @consumer.call(event)
         rescue StandardError => error
           @errors << error
-          @on_error&.call(error, event)
+          begin
+            @on_error&.call(error, event)
+          rescue StandardError => callback_error
+            @errors << callback_error
+          end
         end
       end
     end
