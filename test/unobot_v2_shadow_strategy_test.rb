@@ -116,6 +116,34 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     end
   end
 
+  class ScopedShadow
+    attr_reader :started, :cancelled
+
+    def initialize(action)
+      @action = action
+      @gate = Queue.new
+      @started = Queue.new
+      @cancelled = Queue.new
+    end
+
+    def decide(request)
+      started << request.metadata[:channel]
+      @gate.pop if request.metadata[:channel] == '#a'
+      @action
+    end
+
+    def cancel_scope(scope, reason:)
+      cancelled << [scope, reason]
+      @gate << true if scope == 'machine:#a'
+      :cancelled
+    end
+
+    def shutdown
+      @gate << true
+      self
+    end
+  end
+
   def setup
     @request = UnobotV2::Canonical::DecisionRequest.new(
       your_id: 'Bot', hand: ['r5'], top_card: 'b7', game_state: 'normal',
@@ -270,6 +298,31 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     wait_until { wrapper.diagnostics.fetch(:queued_decisions).zero? }
   end
 
+  def test_channel_scoped_cancel_preserves_unrelated_queued_shadow_decision
+    observations = Queue.new
+    primary = NoopPrimary.new(@draw)
+    shadow = ScopedShadow.new(@play)
+    wrapper = build(primary, shadow, observations, queue_capacity: 2)
+    request_a = request('a1', channel: '#a', game_id: 'ga')
+    request_b = request('b1', channel: '#b', game_id: 'gb')
+
+    assert_equal @draw, wrapper.decide(request_a)
+    assert_equal '#a', shadow.started.pop(timeout: 1)
+    assert_equal @draw, wrapper.decide(request_b)
+    assert_equal :cancelled, wrapper.cancel_scope('machine:#a', reason: 'a_ended')
+    assert_equal ['machine:#a', 'a_ended'], shadow.cancelled.pop(timeout: 1)
+
+    results = 2.times.map { observations.pop(timeout: 1) }
+    result_a = results.find { |result| result.decision_id == 'a1' }
+    result_b = results.find { |result| result.decision_id == 'b1' }
+    assert_equal :dropped, result_a.status
+    assert_equal :shadow_decision_invalidated, result_a.error_code
+    assert_equal :ok, result_b.status
+    assert_equal '#b', result_b.channel
+    assert_equal '#b', shadow.started.pop(timeout: 1)
+    refute wrapper.diagnostics.fetch(:shadow_disabled)
+  end
+
   def test_configuration_accepts_only_canonical_shadow_strategies
     assert_nil UnobotV2::Configuration.shadow_strategy({})
     assert_nil UnobotV2::Configuration.shadow_strategy('UNO_SHADOW_STRATEGY' => 'none')
@@ -290,10 +343,12 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     wrapper
   end
 
-  def request(decision_id)
+  def request(decision_id, channel: '#uno', game_id: 'g1')
     UnobotV2::Canonical::DecisionRequest.from_protocol(
       @request.protocol_h,
-      metadata: @request.metadata.merge(decision_id: decision_id)
+      metadata: @request.metadata.merge(
+        decision_id: decision_id, channel: channel, game_id: game_id
+      )
     )
   end
 

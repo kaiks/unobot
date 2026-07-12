@@ -190,7 +190,8 @@ module UnobotV2
           next false
         end
 
-        epoch = [@global_epoch, @scope_epochs[scope]].freeze
+        @scope_epochs[scope] = @scope_epochs.fetch(scope, 0)
+        epoch = [@global_epoch, @scope_epochs.fetch(scope)].freeze
         item = Decision.new(request: request, primary_action: action, scope: scope, epoch: epoch).freeze
         @pending_decisions += 1
         @decision_queue << item
@@ -360,8 +361,12 @@ module UnobotV2
     end
 
     def invalidate_scope_locked(scope, prefix: false)
-      if scope.nil? || prefix
+      if scope.nil?
         @global_epoch += 1
+      elsif prefix
+        @scope_epochs.keys.select { |matching_scope| scope_prefix?(matching_scope, scope) }.each do |matching_scope|
+          @scope_epochs[matching_scope] += 1
+        end
       else
         @scope_epochs[scope] += 1
       end
@@ -369,7 +374,7 @@ module UnobotV2
 
     def inflight_for_control_locked?(item)
       return !@inflight.empty? if item.scope.nil?
-      return @inflight.keys.any? { |scope| scope.start_with?(item.scope) } if item.prefix
+      return @inflight.keys.any? { |scope| scope_prefix?(scope, item.scope) } if item.prefix
 
       @inflight.key?(item.scope)
     end
@@ -405,6 +410,10 @@ module UnobotV2
         worker.join
       end
       raise RuntimeError, 'shadow worker did not terminate' if worker.alive?
+    end
+
+    def scope_prefix?(candidate, prefix)
+      candidate == prefix || candidate.start_with?("#{prefix}:")
     end
   end
 end
