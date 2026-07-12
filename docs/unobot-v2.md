@@ -122,6 +122,13 @@ are enqueued on the same ordered path and recover incomplete frames after the
 a 30-second missing ACK as uncertain execution: it invalidates and
 re-registers but never replays the action.
 
+Nonretryable stale/protocol/transport failures re-register for authoritative
+state. Terminal authorization/game errors (`no_game`, `not_allowlisted`,
+`not_player`, `game_changed`, `registration_taken`, `not_registered`,
+`unknown_game`, `game_ended`, and `unauthorized`) remain stopped in their named
+lifecycle state until the operator or IRC lifecycle explicitly starts a new
+registration; they do not create a registration loop.
+
 Private NOTICE has no channel, so the machine ingress never uses a most-recent
 channel guess. Registration errors without a game ID are routed only when one
 registration is pending. Multiple pending registrations make such a frame

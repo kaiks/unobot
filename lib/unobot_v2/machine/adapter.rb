@@ -17,6 +17,10 @@ module UnobotV2
         game_ended stopped unregistered nick_changed parted quit kicked
         disconnected plugin_unloaded
       ].freeze
+      TERMINAL_ERROR_CODES = %w[
+        no_game not_allowlisted not_player game_changed registration_taken
+        not_registered unknown_game game_ended unauthorized
+      ].freeze
       HISTORY_LIMIT = 64
       DEFAULT_ACK_TIMEOUT = 30.0
 
@@ -106,6 +110,7 @@ module UnobotV2
         return sent if sent.error?
 
         @submitted_decision_id = decision_id
+        @submitted_action_type = canonical.action
         @action_sent_at = now
         @lifecycle = :awaiting_ack
         success(line: encoded.value)
@@ -196,8 +201,12 @@ module UnobotV2
       def receive_state(payload)
         decision_id = payload.fetch('decision_id')
         reason = payload.fetch('reason')
-        return failure(:invalid_decision_id) unless Protocol.token?(decision_id, allow_dash: false)
-        return failure(:invalid_reason) unless REASONS.include?(reason)
+        unless Protocol.token?(decision_id, allow_dash: false)
+          return fail_closed!(:invalid_decision_id, 'STATE decision ID is invalid', reregister: true)
+        end
+        unless REASONS.include?(reason)
+          return fail_closed!(:invalid_reason, 'STATE reason is invalid', reregister: true)
+        end
         decision_key = [game_id, decision_id]
         return success if @seen_decisions.include?(decision_key)
 
@@ -226,6 +235,9 @@ module UnobotV2
         unless @submitted_decision_id == message.decision_id && lifecycle == :awaiting_ack
           return failure(:stale_ack)
         end
+        if @submitted_action_type != message.action
+          return fail_closed!(:ack_mismatch, 'ACK action does not match the submission', reregister: true)
+        end
 
         invalidate_decision!
         @lifecycle = :registered
@@ -236,17 +248,27 @@ module UnobotV2
       def receive_error(message)
         return receive_registration_error(message) if message.game_id == '-'
         return failure(:unknown_game) unless message.game_id == game_id
-        if message.decision_id != '-' && active_request&.decision_id != message.decision_id
-          return failure(:stale_error)
-        end
 
         @last_error = message.code.freeze
         if message.retryable
+          unless active_request && message.decision_id == active_request.decision_id
+            return fail_closed!(:invalid_retry, 'retryable error has no active decision', reregister: true)
+          end
           @submitted_decision_id = nil
+          @submitted_action_type = nil
+          @action_sent_at = nil
           @lifecycle = :active
           status(:retryable_error, event: message.code)
           failure(message.code.to_sym, message.code, retryable: true)
         else
+          if message.decision_id != '-' && active_request&.decision_id != message.decision_id
+            return failure(:stale_error)
+          end
+          if TERMINAL_ERROR_CODES.include?(message.code)
+            invalidate_session!(message.code.to_sym)
+            status(:terminal_error, event: message.code)
+            return failure(message.code.to_sym, message.code)
+          end
           fail_closed!(message.code.to_sym, message.code,
                        reregister: true)
         end
@@ -307,6 +329,7 @@ module UnobotV2
       def invalidate_decision!
         @active_request = nil
         @submitted_decision_id = nil
+        @submitted_action_type = nil
         @action_sent_at = nil
         @active_lifecycle_token = nil
       end

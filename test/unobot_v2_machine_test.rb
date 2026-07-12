@@ -365,6 +365,46 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal :action_unavailable,
                  @adapter.submit({ action: 'pass' }, decision_id: request.decision_id).code
   end
+
+  def test_ack_action_mismatch_and_invalid_state_metadata_fail_closed
+    register
+    request = deliver_state.request
+    @adapter.submit({ action: 'draw' }, decision_id: request.decision_id)
+    mismatch = @fixture.fetch('ack_line')
+    result = @adapter.receive(UnobotV2::Machine::Protocol.parse(mismatch).value)
+    assert_equal :ack_mismatch, result.code
+    assert_equal :registering, @adapter.lifecycle
+    assert_equal '.uno machine register', @sent.last[1]
+
+    register(@adapter)
+    payload = {
+      protocol: 'UNO_MACHINE_V1', protocol_version: 1, type: 'request_action',
+      game_id: 'gameFixture1', decision_id: 'decisionFixture2', reason: 'future_reason',
+      request: JSON.parse(File.read(UnobotV2MachineProtocolTest::JEDNA_PATH))
+    }
+    result = deliver_payload(payload)
+    assert_equal :invalid_reason, result.code
+    assert_equal :registering, @adapter.lifecycle
+  end
+
+  def test_retryable_error_without_an_active_decision_is_rejected_and_resynchronized
+    register
+    error = 'UNO_MACHINE_V1 ERROR game=gameFixture1 decision=decisionFixture1 ' \
+            'code=card_not_playable retry=1'
+    result = @adapter.receive(UnobotV2::Machine::Protocol.parse(error).value)
+    assert_equal :invalid_retry, result.code
+    assert_equal :registering, @adapter.lifecycle
+  end
+
+  def deliver_payload(payload)
+    encoded = Base64.urlsafe_encode64(Zlib::Deflate.deflate(JSON.generate(payload)), padding: false)
+    chunks = encoded.scan(/.{1,128}/)
+    chunks.each_with_index.map do |chunk, index|
+      line = "UNO_MACHINE_V1 STATE game=#{payload.fetch(:game_id)} " \
+             "decision=#{payload.fetch(:decision_id)} part=#{index + 1}/#{chunks.length} data=#{chunk}"
+      @adapter.receive(UnobotV2::Machine::Protocol.parse(line).value)
+    end.last
+  end
 end
 
 class UnobotV2MachineIngressTest < Minitest::Test
