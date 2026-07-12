@@ -5,6 +5,7 @@ require 'cinch'
 require 'json'
 require 'thread'
 require_relative '../bot_config.rb'
+require_relative 'bounded_log'
 require_relative 'unobot_v2/configuration'
 
 UNOBOT_RUNTIME = UnobotV2::Configuration.runtime(ENV)
@@ -49,7 +50,11 @@ $bot = Cinch::Bot.new do
     end
   end
 end
-$bot.loggers << Cinch::Logger::FormattedLogger.new(File.open('logs/exceptions.log', 'a'))
+log_max_bytes = Integer(ENV.fetch('UNO_LOG_MAX_BYTES', (10 * 1024 * 1024).to_s))
+log_backups = Integer(ENV.fetch('UNO_LOG_BACKUPS', '3'))
+$bot.loggers << Cinch::Logger::FormattedLogger.new(
+  BoundedLog.new('logs/exceptions.log', max_bytes: log_max_bytes, backups: log_backups)
+)
 $bot.loggers[1].level = :error
 
 if UNOBOT_RUNTIME == 'v2'
@@ -85,7 +90,14 @@ if UNOBOT_RUNTIME == 'v2'
       shutdown_timeout: Float(ENV.fetch('UNO_OPERATIONS_SHUTDOWN_TIMEOUT', '30')),
       worker_count: Integer(ENV.fetch('UNO_OPERATIONS_WORKERS', '4')),
       client_capacity: Integer(ENV.fetch('UNO_OPERATIONS_CLIENT_CAPACITY', '32')),
-      on_restart: -> { $bot.quit('operator requested restart') }
+      on_restart: lambda do
+        $unobot_restart_requested = true
+        begin
+          $bot.quit('operator requested restart')
+        rescue StandardError
+          # #quit sets Cinch's quitting flag before it needs a connected send queue.
+        end
+      end
     ).start
   end
   at_exit { $unobot_operations&.stop }

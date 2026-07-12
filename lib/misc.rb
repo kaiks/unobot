@@ -6,7 +6,12 @@ require 'fileutils'
 log_directory = File.expand_path('../logs', __dir__)
 FileUtils.mkdir_p(log_directory)
 
-$logger = Logger.new(File.join(log_directory, 'unobot.log'), 'daily', 10)
+log_max_bytes = Integer(ENV.fetch('UNO_LOG_MAX_BYTES', (10 * 1024 * 1024).to_s))
+log_backups = Integer(ENV.fetch('UNO_LOG_BACKUPS', '3'))
+raise ArgumentError, 'UNO_LOG_MAX_BYTES must be positive' unless log_max_bytes.positive?
+raise ArgumentError, 'UNO_LOG_BACKUPS must be nonnegative' if log_backups.negative?
+
+$logger = Logger.new(File.join(log_directory, 'unobot.log'), log_backups, log_max_bytes)
 $logger_queue = Queue.new
 $logger.datetime_format = '%H:%M:%S'
 
