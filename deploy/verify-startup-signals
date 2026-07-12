@@ -6,13 +6,36 @@ checkpoint=${UNO_CHECKPOINT:?set UNO_CHECKPOINT to an absolute checkpoint path}
 case "$checkpoint" in /*) ;; *) echo 'UNO_CHECKPOINT must be absolute' >&2; exit 2 ;; esac
 
 current=''
+identities=$(mktemp)
 cleanup() {
   test -z "$current" || docker rm -f "$current" >/dev/null 2>&1 || true
+  rm -f "$identities"
 }
 trap cleanup EXIT INT TERM
 
-for delay in ${UNO_SIGNAL_DELAYS:-0 0.05 0.2 0.5}; do
-  current="unobot-startup-signal-$$-$(printf '%s' "$delay" | tr '.' '-')"
+proc_starttime() {
+  pid=$1
+  test -r "/proc/$pid/stat" || return 1
+  stat=$(cat "/proc/$pid/stat") || return 1
+  rest=${stat##*) }
+  set -- $rest
+  test "$#" -ge 20 || return 1
+  printf '%s\n' "${20}"
+}
+
+capture_identity() {
+  pid=$1
+  before=$(proc_starttime "$pid") || return 1
+  command=$(tr '\000' ' ' 2>/dev/null < "/proc/$pid/cmdline") || return 1
+  after=$(proc_starttime "$pid") || return 1
+  test "$before" = "$after" || return 1
+  test -n "$command" || return 1
+  printf '%s|%s|%s\n' "$pid" "$before" "$command"
+}
+
+start_container() {
+  suffix=$(printf '%s' "$1" | tr '.' '-')
+  current="unobot-startup-signal-$$-$suffix"
   docker run -d --name "$current" --platform linux/amd64 \
     --read-only --user 10001:10001 --cap-drop ALL \
     --security-opt no-new-privileges --memory 1g --pids-limit 128 \
@@ -25,20 +48,86 @@ for delay in ${UNO_SIGNAL_DELAYS:-0 0.05 0.2 0.5}; do
     -e UNO_SHADOW_STRATEGY=none -e UNO_CHANNELS='#startup-signal' \
     -e UNO_HOST_NICKS=Host -e UNO_ADMIN_NICKS=Admin -e UNO_AUTOJOIN=false \
     "$image" >/dev/null
-  sleep "$delay"
+}
+
+observe_models() {
   model_pids=$(docker top "$current" -eo pid,args 2>/dev/null | awk '/rl_agent.sb3_opponent/ {print $1}' || true)
+  : > "$identities"
+  for pid in $model_pids; do
+    capture_identity "$pid" >> "$identities" || true
+  done
+  identity_count=$(wc -l < "$identities")
+  test "$identity_count" -le 1 || {
+    echo "observed more than one model process" >&2
+    docker top "$current" -eo pid,args >&2 || true
+    exit 1
+  }
+}
+
+assert_captured_model_alive() {
+  test "$(wc -l < "$identities")" -eq 1 || return 1
+  IFS='|' read -r pid expected_starttime expected_command < "$identities"
+  actual_starttime=$(proc_starttime "$pid" 2>/dev/null || true)
+  actual_command=$(tr '\000' ' ' 2>/dev/null < "/proc/$pid/cmdline" || true)
+  test "$actual_starttime" = "$expected_starttime" &&
+    test "$actual_command" = "$expected_command"
+}
+
+stop_and_assert() {
+  description=$1
+  observed=$(wc -l < "$identities")
   started=$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC)')
   docker stop -t 20 "$current" >/dev/null
   elapsed=$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC) - ARGV[0].to_f' "$started")
   test "$(docker inspect "$current" --format '{{.State.ExitCode}}')" -eq 0
   ruby -e 'abort "startup signal stop exceeded 20 seconds" unless ARGV[0].to_f < 20' "$elapsed"
-  for pid in $model_pids; do
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "model process $pid survived startup signal at $delay seconds" >&2
+  while IFS='|' read -r pid expected_starttime expected_command; do
+    test -n "$pid" || continue
+    actual_starttime=$(proc_starttime "$pid" 2>/dev/null || true)
+    actual_command=$(tr '\000' ' ' 2>/dev/null < "/proc/$pid/cmdline" || true)
+    if test "$actual_starttime" = "$expected_starttime"; then
+      echo "model process $pid survived $description" >&2
+      echo "recorded command: $expected_command" >&2
+      echo "current command: $actual_command" >&2
       exit 1
     fi
-  done
-  printf 'delay=%s exit=0 elapsed=%ss model_reaped=yes\n' "$delay" "$elapsed"
+  done < "$identities"
+  printf '%s exit=0 elapsed=%ss model_identities_reaped=%s\n' "$description" "$elapsed" "$observed"
   docker rm "$current" >/dev/null
   current=''
+}
+
+# Preserve the exact container-start offsets, including signals sent before the
+# model subprocess exists.
+for delay in ${UNO_SIGNAL_DELAYS:-0 0.05 0.2 0.5}; do
+  start_container "startup-$(printf '%s' "$delay" | tr '.' '-')"
+  sleep "$delay"
+  observe_models
+  stop_and_assert "phase=startup delay=${delay}s"
+done
+
+# Separately prove that a model process positively identified by host PID,
+# /proc starttime, and command is still alive immediately before TERM and that
+# this exact process identity is gone afterward.
+for delay in ${UNO_MODEL_SIGNAL_DELAYS:-0.05 0.2 0.5}; do
+  start_container "model-$(printf '%s' "$delay" | tr '.' '-')"
+  attempts=${UNO_MODEL_START_ATTEMPTS:-400}
+  while :; do
+    observe_models
+    test "$identity_count" -eq 0 || break
+    attempts=$((attempts - 1))
+    test "$attempts" -gt 0 || {
+      echo "model process did not become observable" >&2
+      docker logs "$current" >&2 || true
+      exit 1
+    }
+    sleep 0.025
+  done
+  sleep "$delay"
+  assert_captured_model_alive || {
+    echo "captured model process was not alive immediately before TERM" >&2
+    docker top "$current" -eo pid,args >&2 || true
+    exit 1
+  }
+  stop_and_assert "phase=model-observed delay=${delay}s"
 done
