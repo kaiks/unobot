@@ -137,6 +137,8 @@ module UnobotV2
         @status_anchor = nil
         @pending_count_assertions = {}
         @play_effect_pending = false
+        @pending_play_effect = nil
+        @last_effect_turn_pair = nil
       end
 
       def host?(nick)
@@ -215,7 +217,7 @@ module UnobotV2
         return drew(DRAW_RE.match(text)[1]) if DRAW_RE.match?(text)
         return double_pending if text == '[Playing two cards]'
         return reverse_order(text) if text.match?(/\APlayer order reversed(?: twice)?!\z/)
-        return play_effect if text.match?(/\A.+ (?:was|were) skipped!\z/)
+        return play_effect(text) if text.match?(/\A.+ (?:was|were) skipped!\z/)
         return game_end if text.match?(/ gains \d+ points\.|loses instantly|Uno game has been stopped\./)
         if text.include?("'s turn") || text.include?('Top card:') || text.start_with?('Card count:')
           uncertain!('malformed_game_event')
@@ -259,6 +261,8 @@ module UnobotV2
         @private_penalty_draw.clear
         @pending_count_assertions.clear
         @play_effect_pending = false
+        @pending_play_effect = nil
+        @last_effect_turn_pair = nil
         %i[phase current top_card game_state stacked_cards already_picked players].each { |fact| @facts[fact] = 'exact' }
         if phase != 'active'
           @unsafe_reasons = ['game_not_active']
@@ -348,6 +352,13 @@ module UnobotV2
       def turn(match)
         return Reduction.new if match[0] == @last_turn_line && !@play_effect_pending
 
+        pending_pair = [@pending_play_effect, match[0]] if @pending_play_effect
+        if pending_pair && pending_pair == @last_effect_turn_pair
+          @pending_play_effect = nil
+          @play_effect_pending = false
+          return unsafe_reduction('ambiguous_repeated_play_effect')
+        end
+
         passer, current, card_text = match.captures
         cards = CardParser.parse_all(card_text)
         if cards.length != 1
@@ -415,6 +426,8 @@ module UnobotV2
         @unsafe_reasons.delete('awaiting_penalty_pass')
         @double_pending = false
         @play_effect_pending = false
+        @last_effect_turn_pair = pending_pair
+        @pending_play_effect = nil
         if passer
           @mode = 'normal'
           @stacked = 0
@@ -457,6 +470,7 @@ module UnobotV2
         else
           @double_pending = true
           @play_effect_pending = true
+          @pending_play_effect = nil
           Reduction.new(changed: true)
         end
       end
@@ -464,13 +478,15 @@ module UnobotV2
       def reverse_order(text)
         @status_anchor = nil
         @play_effect_pending = true
+        @pending_play_effect = text
         @facts[:players] = 'derived'
         Reduction.new(changed: true)
       end
 
-      def play_effect
+      def play_effect(text)
         @status_anchor = nil
         @play_effect_pending = true
+        @pending_play_effect = text
         @facts[:players] = 'derived'
         Reduction.new(changed: true)
       end

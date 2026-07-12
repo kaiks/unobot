@@ -285,12 +285,32 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
     assert_equal 1, counts.fetch('Bob')
 
+    # Repeating the whole pair is indistinguishable from another identical skip.
+    @adapter.receive(event('Alice was skipped!'))
+    reduction = @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
+    assert_equal 'ambiguous repeated play effect', reduction.reason
+    assert_equal 1, counts.fetch('Bob'), 'ambiguous pair must not decrement twice'
+    refute @adapter.reducer.safe?
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
+    assert_empty @requests
+
+    request = synchronize(top: 'b5', players: 'Alice:3,Bob:1')
+    assert request
+    assert_equal 1, request.other_players.first.card_count
+
     setup
     synchronize(current: 'Bob', players: 'Bob:2,Alice:3', top: 'bs')
     @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
     @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
     counts = @adapter.reducer.instance_variable_get(:@counts)
     assert_equal 2, counts.fetch('Bob'), 'unaccompanied repeated snapshot turn is deduplicated'
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:3,Alice:3', top: 'bs')
+    @adapter.receive(event('Alice was skipped!'))
+    @adapter.receive(event("Bob's turn. Top card: \x0312[S]"))
+    request = @adapter.receive(event("Alice's turn. Top card: \x0312[5]")).request
+    assert_equal 1, request.other_players.first.card_count, 'a distinct next play remains observable'
   end
 
   def test_submitted_same_top_skip_is_not_mistaken_for_a_status_duplicate
