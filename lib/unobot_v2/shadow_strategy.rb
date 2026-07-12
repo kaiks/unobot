@@ -12,7 +12,7 @@ module UnobotV2
   class ShadowStrategy < Strategy
     Observation = Struct.new(
       :status, :channel, :game_id, :decision_id, :primary_action,
-      :shadow_action, :agreement, :error_code, :error_message,
+      :shadow_action, :agreement, :latency_ms, :error_code, :error_message,
       keyword_init: true
     ) do
       def to_h
@@ -33,7 +33,10 @@ module UnobotV2
 
       @primary = primary
       @shadow = shadow
-      @queue = SizedQueue.new(Integer(queue_capacity))
+      @queue_capacity = Integer(queue_capacity)
+      raise ArgumentError, 'queue capacity must be positive' unless @queue_capacity.positive?
+
+      @queue = Queue.new
       @shutdown_timeout = Float(shutdown_timeout)
       raise ArgumentError, 'shutdown timeout must be positive' unless @shutdown_timeout.positive?
 
@@ -42,6 +45,7 @@ module UnobotV2
       @shutdown = false
       @dropped = 0
       @observed = 0
+      @pending_decisions = 0
       @worker = Thread.new { consume }
     end
 
@@ -96,12 +100,7 @@ module UnobotV2
         return self if @shutdown
 
         @shutdown = true
-        begin
-          @queue.push(STOP, true)
-        rescue ThreadError
-          @queue.pop(true) until @queue.empty?
-          @queue.push(STOP, true)
-        end
+        @queue << STOP
         @worker
       end
       worker.join(@shutdown_timeout)
@@ -124,16 +123,29 @@ module UnobotV2
     def enqueue_lifecycle(method, *args, **keywords)
       return unless shadow.respond_to?(method)
 
-      enqueue(Lifecycle.new(method: method, args: args.freeze, keywords: keywords.freeze).freeze)
+      item = Lifecycle.new(method: method, args: args.freeze, keywords: keywords.freeze).freeze
+      @mutex.synchronize do
+        return false if @shutdown
+
+        @queue << item
+      end
+      true
     end
 
     def enqueue(item, request: nil)
-      return false if @mutex.synchronize { @shutdown }
+      admitted = @mutex.synchronize do
+        next false if @shutdown
+        if item.is_a?(Decision) && @pending_decisions >= @queue_capacity
+          @dropped += 1
+          next false
+        end
 
-      @queue.push(item, true)
-      true
-    rescue ThreadError
-      @mutex.synchronize { @dropped += 1 }
+        @pending_decisions += 1 if item.is_a?(Decision)
+        @queue << item
+        true
+      end
+      return true if admitted
+
       report(observation(request, status: :dropped, error_code: :shadow_queue_full,
                                   error_message: 'shadow observation queue is full')) if request
       false
@@ -144,7 +156,15 @@ module UnobotV2
         item = @queue.pop
         break if item.equal?(STOP)
 
-        item.is_a?(Decision) ? observe(item) : apply_lifecycle(item)
+        if item.is_a?(Decision)
+          begin
+            observe(item)
+          ensure
+            @mutex.synchronize { @pending_decisions -= 1 }
+          end
+        else
+          apply_lifecycle(item)
+        end
       rescue StandardError => error
         report(Observation.new(status: :worker_error, error_code: :shadow_worker_error,
                                error_message: error.message.to_s.byteslice(0, 256)))
@@ -152,16 +172,19 @@ module UnobotV2
     end
 
     def observe(item)
+      started = monotonic_now
       shadow_action = ActionValidator.validate(shadow.decide(item.request), request: item.request)
       @mutex.synchronize { @observed += 1 }
       report(observation(
         item.request, status: :ok, primary_action: item.primary_action.to_h,
-        shadow_action: shadow_action.to_h, agreement: item.primary_action == shadow_action
+        shadow_action: shadow_action.to_h, agreement: item.primary_action == shadow_action,
+        latency_ms: elapsed_ms(started)
       ))
     rescue StandardError => error
       @mutex.synchronize { @observed += 1 }
       report(observation(
         item.request, status: :error, primary_action: item.primary_action.to_h,
+        latency_ms: elapsed_ms(started),
         error_code: error.respond_to?(:code) ? error.code : :shadow_error,
         error_message: error.message.to_s.byteslice(0, 256)
       ))
@@ -186,6 +209,14 @@ module UnobotV2
       @on_observation&.call(result)
     rescue StandardError
       nil
+    end
+
+    def monotonic_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def elapsed_ms(started)
+      ((monotonic_now - started) * 1_000).round(3)
     end
   end
 end

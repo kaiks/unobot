@@ -66,6 +66,7 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     assert_equal({ action: 'draw' }, result.primary_action)
     assert_equal({ action: 'play', card: 'r5' }, result.shadow_action)
     refute result.agreement
+    assert_operator result.latency_ms, :>=, 0
     assert_equal '#uno', result.channel
     assert_equal 'g1', result.game_id
     assert_equal 'd1', result.decision_id
@@ -113,15 +114,30 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     wrapper.decide(@request)
     wait_until { !shadow.calls.empty? }
     second = request('d2')
-    third = request('d3')
     assert_equal @draw, wrapper.decide(second)
-    assert_equal @draw, wrapper.decide(third)
     dropped = observations.pop(timeout: 1)
     assert_equal :dropped, dropped.status
     assert_equal :shadow_queue_full, dropped.error_code
-    assert_equal 'd3', dropped.decision_id
+    assert_equal 'd2', dropped.decision_id
     gate << true
+  end
+
+  def test_lifecycle_is_guaranteed_while_decision_capacity_is_saturated
+    gate = Queue.new
+    observations = Queue.new
+    primary = FakeStrategy.new(action: @draw)
+    shadow = FakeStrategy.new(action: @play, gate: gate)
+    wrapper = build(primary, shadow, observations, queue_capacity: 1)
+
+    wrapper.decide(@request)
+    wait_until { !shadow.calls.empty? }
+    assert_equal [:decide, @request], shadow.calls.pop(timeout: 1)
+    wrapper.game_end_for(@request, reason: 'saturated_end')
+    assert_equal @draw, wrapper.decide(request('d2'))
+    assert_equal :dropped, observations.pop(timeout: 1).status
     gate << true
+    assert_equal :ok, observations.pop(timeout: 1).status
+    assert_equal [:game_end_for, @request, 'saturated_end'], shadow.calls.pop(timeout: 1)
   end
 
   def test_configuration_accepts_only_canonical_shadow_strategies
