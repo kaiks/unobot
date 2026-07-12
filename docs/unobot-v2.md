@@ -100,7 +100,8 @@ lifecycle callbacks) and call `enqueue`. Machine registration and ACTION
 output retain the IRC-facing `uno` name. The legacy starter remains unchanged
 until the selectable strategies required by the next stage exist.
 
-`UnobotV2::CinchBridge` is the concrete v2 attachment. Construct it with the
+`UnobotV2::CinchBridge` is the concrete v2 attachment. Load it with
+`require 'unobot_v2/cinch_bridge'`, construct it with the
 connected `Cinch::Bot` and an injected strategy, then call `attach!` before the
 bot starts. It installs minimal synchronous dispatch-boundary handlers which
 only snapshot immutable callback data and nonblockingly enqueue it. A bridge

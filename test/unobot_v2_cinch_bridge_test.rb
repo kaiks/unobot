@@ -3,6 +3,7 @@
 require_relative 'test_helper'
 require 'json'
 require_relative '../lib/unobot_v2'
+require_relative '../lib/unobot_v2/cinch_bridge'
 
 class UnobotV2CinchBridgeTest < Minitest::Test
   Fixture = Struct.new(:command, :user, :channel, :message, :params, keyword_init: true)
