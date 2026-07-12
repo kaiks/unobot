@@ -1,0 +1,49 @@
+services:
+  unobot:
+    image: ${UNO_IMAGE:-unobot-neural:17.5m}
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: ${UNO_MEMORY_LIMIT:-1g}
+    cpus: ${UNO_CPU_LIMIT:-2.0}
+    stop_grace_period: 20s
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /run/unobot:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=10001,gid=10001
+    volumes:
+      - ${UNO_CHECKPOINT:?set UNO_CHECKPOINT to checkpoint_17500000_steps.zip}:/models/checkpoint_17500000_steps.zip:ro
+      - unobot-logs:/unobot/logs
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      IRC_SERVER: ${IRC_SERVER:?set IRC_SERVER}
+      IRC_PORT: ${IRC_PORT:-6667}
+      IRC_NICK: ${IRC_NICK:-unobot}
+      UNO_RUNTIME: v2
+      UNO_MESSAGING: ${UNO_MESSAGING:-machine}
+      UNO_STRATEGY: ${UNO_STRATEGY:-simple}
+      UNO_SHADOW_STRATEGY: ${UNO_SHADOW_STRATEGY:-neural}
+      UNO_MACHINE_HUMAN_FALLBACK: ${UNO_MACHINE_HUMAN_FALLBACK:-false}
+      UNO_AUTOJOIN: ${UNO_AUTOJOIN:-false}
+      UNO_CHANNELS: ${UNO_CHANNELS:?set UNO_CHANNELS}
+      UNO_HOST_NICKS: ${UNO_HOST_NICKS:?set UNO_HOST_NICKS}
+      UNO_ADMIN_NICKS: ${UNO_ADMIN_NICKS:?set UNO_ADMIN_NICKS}
+      UNO_NEURAL_CHECKPOINT_SHA256: ${UNO_NEURAL_CHECKPOINT_SHA256:-3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f}
+      UNO_NEURAL_STOCHASTIC: ${UNO_NEURAL_STOCHASTIC:-false}
+      UNO_OPERATIONS_SOCKET: /run/unobot/control.sock
+      OMP_NUM_THREADS: ${UNO_TORCH_THREADS:-1}
+      MKL_NUM_THREADS: ${UNO_TORCH_THREADS:-1}
+      OPENBLAS_NUM_THREADS: ${UNO_TORCH_THREADS:-1}
+    healthcheck:
+      test: ["CMD", "/unobot/bin/unobotctl", "health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  unobot-logs:

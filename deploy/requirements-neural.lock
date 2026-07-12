@@ -1,0 +1,31 @@
+# Inference-only lock for the amd64 Debian bookworm deployment image.
+# Torch is selected from the official CPU wheel index by deploy/Dockerfile.
+Farama-Notifications==0.0.4
+Jinja2==3.1.4
+MarkupSafe==3.0.2
+cloudpickle==3.1.1
+contourpy==1.3.3
+cycler==0.12.1
+filelock==3.13.1
+fonttools==4.60.0
+fsspec==2024.6.1
+gymnasium==1.2.0
+kiwisolver==1.4.9
+matplotlib==3.10.6
+mpmath==1.3.0
+networkx==3.3
+numpy==2.3.5
+packaging==24.1
+pandas==2.3.2
+pillow==12.1.0
+pyparsing==3.2.5
+python-dateutil==2.9.0.post0
+pytz==2025.2
+sb3-contrib==2.7.0
+setuptools==70.2.0
+six==1.17.0
+stable-baselines3==2.7.0
+sympy==1.13.3
+torch==2.8.0+cpu
+typing_extensions==4.12.2
+tzdata==2025.2

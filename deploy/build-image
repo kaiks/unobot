@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+jedna_root=${JEDNA_ROOT:-"$root/../jedna"}
+jedna_ref=${JEDNA_REF:-17ada2012112abf1df2cd2a31342fcad2f3ed18a}
+image=${UNO_IMAGE:-unobot-neural:17.5m}
+
+if ! git -C "$jedna_root" cat-file -e "$jedna_ref^{commit}" 2>/dev/null; then
+  echo "Jedna commit $jedna_ref is unavailable; fetch it or set JEDNA_ROOT" >&2
+  exit 2
+fi
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT INT TERM
+git -C "$jedna_root" archive "$jedna_ref" \
+  extension-gems/jedna-tournaments/examples | tar -x -C "$temporary"
+examples="$temporary/extension-gems/jedna-tournaments/examples"
+git -C "$jedna_root" show "$jedna_ref:LICENSE" > "$examples/JEDNA-LICENSE"
+
+docker buildx build --load \
+  --build-context "jedna_examples=$examples" \
+  --build-arg "JEDNA_REF=$jedna_ref" \
+  --tag "$image" \
+  --file "$root/deploy/Dockerfile" \
+  "$root"

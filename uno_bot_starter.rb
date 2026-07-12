@@ -12,7 +12,14 @@ previous_traps = %w[INT TERM].to_h do |signal|
 end
 signal_thread = Thread.new do
   signal_reader.read(1)
-  $bot.quit('termination signal')
+  begin
+    $bot.quit('termination signal')
+  rescue StandardError
+    # Cinch has no send queue before the first successful IRC connection, but
+    # #quit sets its quitting flag before attempting to enqueue QUIT. The
+    # reconnect loop will still stop and the ensure cleanup remains authoritative.
+    nil
+  end
 rescue IOError
   nil
 end
