@@ -571,8 +571,7 @@ module UnobotV2
         figure = %w[w wd4].include?(base) ? base : base[1..]
         case figure
         when 'r'
-          ordered = double ? @players : @players.reverse
-          ordered.rotate(1).first
+          double ? @players.first : @players.reverse.first
         when 's'
           @players.rotate(double ? 3 : 2).first
         else

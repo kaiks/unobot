@@ -268,11 +268,19 @@ class UnobotV2HumanAdapterTest < Minitest::Test
   end
 
   def test_reverse_skip_double_wd4_and_war_pass_transitions
-    synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2', top: 'b7')
+    synchronize(current: 'Bob', players: 'Bob:2,Carol:2,Alice:3', top: 'b7')
     @adapter.receive(event('Player order reversed!'))
     request = @adapter.receive(event("Alice's turn. Top card: \x0312[R]")).request
-    assert_equal %w[Bob Carol], request.other_players.map(&:id)
-    assert_equal 1, request.other_players.first.card_count
+    assert_equal %w[Carol Bob], request.other_players.map(&:id)
+    assert_equal 1, request.other_players.last.card_count
+
+    setup
+    synchronize(current: 'Bob', players: 'Bob:3,Alice:3,Carol:2', top: 'b7')
+    @adapter.receive(event('[Playing two cards]'))
+    @adapter.receive(event('Player order reversed twice!'))
+    reduction = @adapter.receive(event("Bob's turn. Top card: \x0312[R]"))
+    assert_nil reduction.request
+    assert_empty @adapter.reducer.unsafe_reasons
 
     setup
     synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2', top: 'b7')
@@ -328,10 +336,13 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal 0, request.other_players.find { |player| player.id == 'Bob' }.card_count
 
     setup
-    synchronize(current: 'Bob', players: 'Bob:2,Alice:3', top: 'b7')
-    @adapter.receive(event("Bob's turn. Top card: \x0312[R]"))
-    request = @adapter.receive(event("Alice's turn. Top card: \x0312[5]")).request
-    assert_equal 0, request.other_players.find { |player| player.id == 'Bob' }.card_count
+    synchronize(hand: "\x0312[5] #{GREEN_3} #{WD4}",
+                current: 'Bob', players: 'Bob:2,Alice:3', top: 'b7')
+    request = @adapter.receive(event("Alice's turn. Top card: \x0312[R]")).request
+    assert_equal 1, request.other_players.find { |player| player.id == 'Bob' }.card_count
+    reduction = @adapter.receive(event("Bob's turn. Top card: \x0312[5]"))
+    assert_nil reduction.request
+    assert_empty @adapter.reducer.unsafe_reasons
 
     setup
     synchronize(current: 'Bob', players: 'Bob:3,Alice:3,Carol:2', top: 'b7')
@@ -343,8 +354,11 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     setup
     synchronize(current: 'Bob', players: 'Bob:3,Alice:3', top: 'b7')
     @adapter.receive(event('[Playing two cards]'))
-    request = @adapter.receive(event("Alice's turn. Top card: \x0312[R]")).request
-    assert_equal 1, request.other_players.find { |player| player.id == 'Bob' }.card_count
+    reduction = @adapter.receive(event("Bob's turn. Top card: \x0312[R]"))
+    assert_nil reduction.request
+    assert_empty @adapter.reducer.unsafe_reasons
+    request = @adapter.receive(event("Alice's turn. Top card: \x0312[5]")).request
+    assert_equal 0, request.other_players.find { |player| player.id == 'Bob' }.card_count
   end
 
   def test_skip_announcement_disambiguates_identical_status_anchored_turn
