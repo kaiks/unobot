@@ -13,9 +13,10 @@ module UnobotV2
       attr_writer :lifecycle_token, :token_validator
 
       def initialize(channel:, own_nick:, host_nicks:, transport:, on_request: nil,
-                     reducer: nil, encoder: ActionEncoder.new)
+                     on_lifecycle: nil, reducer: nil, encoder: ActionEncoder.new)
         @transport = transport
         @on_request = on_request
+        @on_lifecycle = on_lifecycle
         @reducer = reducer || Reducer.new(channel: channel, own_nick: own_nick, host_nicks: host_nicks)
         @encoder = encoder
         @last_decision_id = nil
@@ -26,7 +27,10 @@ module UnobotV2
       end
 
       def receive(event)
+        prior_phase = reducer.phase
+        prior_request = @active_request
         reduction = reducer.receive(event)
+        lifecycle(event, prior_phase, prior_request)
         return reduction unless token_valid?(@lifecycle_token)
 
         reduction.commands.each { |command| @transport.call(reducer.channel, command) }
@@ -42,7 +46,14 @@ module UnobotV2
         rescue StandardError => error
           @callback_errors << error
           @last_error = :strategy_error
-          resync!('strategy_error')
+          if token_valid?(@active_lifecycle_token)
+            resync!('strategy_error')
+          else
+            reducer.invalidate!('strategy_error_after_invalidation')
+            @active_request = nil
+            @active_lifecycle_token = nil
+            @submitted_decision_id = nil
+          end
           return Reduction.new(changed: true, reason: "strategy_error: #{error.message}")
         end
         reduction
@@ -83,6 +94,22 @@ module UnobotV2
       end
 
       private
+
+      def lifecycle(event, prior_phase, prior_request)
+        if event.kind == :disconnect
+          safe_lifecycle(:cancel, prior_request, 'irc_disconnected')
+        elsif prior_phase != 'waiting' && reducer.phase == 'waiting'
+          safe_lifecycle(:cancel, prior_request, 'new_game_observed') if prior_request
+        elsif prior_phase != 'ended' && reducer.phase == 'ended'
+          safe_lifecycle(:end, prior_request, 'game_ended')
+        end
+      end
+
+      def safe_lifecycle(kind, request, reason)
+        @on_lifecycle&.call(kind, request, reason)
+      rescue StandardError => error
+        @callback_errors << error
+      end
 
       def token_valid?(token)
         !@token_validator || @token_validator.call(token)

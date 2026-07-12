@@ -75,8 +75,26 @@ module UnobotV2
       release(game_key, reason: reason, cancel: false)
     end
 
+    def game_end_for(request, reason: 'game_end')
+      key, = identity_for(request)
+      game_end(key, reason: reason)
+    end
+
     def cancel_game(game_key = nil, reason: 'cancelled')
       release(game_key, reason: reason, cancel: true)
+    end
+
+    def cancel_for(request, reason: 'cancelled')
+      key, = identity_for(request)
+      cancel_game(key, reason: reason)
+    end
+
+    def cancel_scope(scope, reason: 'cancelled')
+      prefix = scope.to_s
+      keys = @mutex.synchronize do
+        @sessions.values.select { |session| session.scope == prefix }.map(&:key)
+      end
+      keys.map { |key| cancel_game(key, reason: reason) }
     end
 
     # Deterministic stock agents never invent another action after an executor

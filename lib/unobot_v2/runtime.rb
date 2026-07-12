@@ -65,9 +65,12 @@ module UnobotV2
     end
 
     def stop
-      @channels.each { |channel| ingress.invalidate(channel) } if mode == 'human'
+      invalidate
+      @strategy.shutdown if @strategy.respond_to?(:shutdown)
       if ingress.respond_to?(:worker_thread?) && ingress.worker_thread?
-        Thread.new { ingress.stop }
+        Thread.new do
+          ingress.stop
+        end
         return Transition.new(code: :ok, message: 'stop deferred from ingress worker', mode: mode)
       end
 
@@ -137,6 +140,9 @@ module UnobotV2
                               message: 'machine to human fallback is disabled', mode: mode)
       end
 
+      if @strategy.respond_to?(:cancel_scope)
+        @channels.each { |channel| @strategy.cancel_scope("machine:#{channel}", reason: 'machine_fallback') }
+      end
       prepared = ingress.prepare_fallback!
       unless prepared.success?
         return Transition.new(code: prepared.code, message: prepared.message, mode: mode)
@@ -181,7 +187,8 @@ module UnobotV2
           adapter = MessagingFactory.build(
             mode: 'human', channel: channel, own_nick: @own_nick,
             host_nicks: @host_nicks, transport: @transport,
-            on_request: callback
+            on_request: callback,
+            on_lifecycle: ->(kind, request, reason) { strategy_lifecycle(kind, request, reason) }
           )
         end
       )
@@ -191,10 +198,11 @@ module UnobotV2
       adapters = @channels.to_h do |channel|
         adapter = nil
         callback = ->(request) { dispatch(adapter, request) }
+        status_callback = ->(result) { machine_status(adapter, result) }
         adapter = MessagingFactory.build(
           mode: 'machine', channel: channel, own_nick: @own_nick,
           host_nicks: @host_nicks, transport: @transport,
-          on_request: callback
+          on_request: callback, on_status: status_callback
         )
         [channel, adapter]
       end
@@ -214,6 +222,56 @@ module UnobotV2
         @callback_errors << error
       end
       @last_submission
+    end
+
+    def strategy_lifecycle(kind, request, reason)
+      return unless request
+
+      if kind == :end && @strategy.respond_to?(:game_end_for)
+        @strategy.game_end_for(request, reason: reason)
+      elsif kind == :cancel && @strategy.respond_to?(:cancel_for)
+        @strategy.cancel_for(request, reason: reason)
+      end
+    end
+
+    def machine_status(adapter, result)
+      case result.code
+      when :retryable_error
+        request = adapter.active_request
+        policy = if request && @strategy.respond_to?(:retryable_error)
+                   @strategy.retryable_error(request, code: result.event)
+                 else
+                   :reregister
+                 end
+        if policy == :reregister
+          if request && @strategy.respond_to?(:cancel_for)
+            @strategy.cancel_for(request, reason: 'retryable_executor_error')
+          end
+          adapter.register!
+        elsif request
+          adapter.submit(policy, decision_id: request.decision_id)
+        end
+      when :terminal_event
+        if result.game_id && @strategy.respond_to?(:game_end)
+          @strategy.game_end(machine_game_key(result), reason: result.event.to_s)
+        elsif result.request && @strategy.respond_to?(:game_end_for)
+          @strategy.game_end_for(result.request, reason: result.event.to_s)
+        end
+      when :terminal_error, :fail_closed, :session_cancelled
+        if result.game_id && @strategy.respond_to?(:cancel_game)
+          @strategy.cancel_game(machine_game_key(result), reason: result.event.to_s)
+        elsif result.request && @strategy.respond_to?(:cancel_for)
+          @strategy.cancel_for(result.request, reason: result.event.to_s)
+        end
+      end
+    rescue StandardError => error
+      @callback_errors << error
+      adapter.register! if result.code == :retryable_error
+    end
+
+
+    def machine_game_key(result)
+      "machine:#{result.channel}:#{result.game_id}"
     end
   end
 end

@@ -83,7 +83,8 @@ module UnobotV2
           metadata: {
             channel: channel, transport: 'human', decision_id: decision_key,
             safe: true, confidence: overall_confidence,
-            facts: @facts.dup, generation: @generation, turn: @turn_number
+            facts: @facts.dup, generation: @generation,
+            game_generation: @game_generation, turn: @turn_number
           }
         )
       end
@@ -112,6 +113,7 @@ module UnobotV2
       private
 
       def reset
+        @game_generation = (@game_generation || 0) + 1
         @phase = 'off'
         @current = nil
         @top_card = nil

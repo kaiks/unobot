@@ -173,4 +173,182 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     assert_equal :shutdown, manager.select('simple').code
     assert_raises(UnobotV2::Configuration::Error) { manager.decide(machine_request) }
   end
+
+  def test_human_runtime_releases_strategy_immediately_on_game_end
+    created = []
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new.tap { |strategy| created << strategy } },
+        crushing: -> { RecordingStrategy.new }
+      }
+    )
+    sent = Queue.new
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'human', strategy: manager, channels: ['#uno'], own_nick: 'unobot',
+      host_nicks: ['Host'], transport: ->(target, line) { sent << [target, line] }
+    ).start
+    human_snapshot(runtime)
+    wait_for { manager.active? }
+    runtime.enqueue(human_event('unobot gains 1 points.'))
+    wait_for { !manager.active? }
+    assert_predicate manager.select('crushing'), :success?
+    assert_equal 1, created.sum { |strategy| strategy.ended.length }
+  ensure
+    runtime&.stop
+  end
+
+  def test_machine_runtime_retry_reregisters_without_replay
+    fixture = JSON.parse(File.read(File.expand_path('fixtures/host_machine_protocol_v1/frames.json', __dir__)))
+    created = []
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new.tap { |strategy| created << strategy } },
+        crushing: -> { RecordingStrategy.new }
+      }
+    )
+    sent = Queue.new
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: manager, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: ->(target, line) { sent << [target, line] }
+    ).start
+    sent.pop
+    runtime.enqueue(machine_notice(fixture.fetch('registered_line')))
+    fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    wait_for { manager.active? && !sent.empty? }
+    outputs = []
+    outputs << sent.pop until sent.empty?
+    assert_equal 1, outputs.count { |_target, line| line.include?(' ACTION ') }
+
+    runtime.enqueue(machine_notice(fixture.fetch('error_line')))
+    wait_for { !manager.active? && !sent.empty? }
+    retry_outputs = []
+    retry_outputs << sent.pop until sent.empty?
+    assert_equal ['.uno machine register'], retry_outputs.map(&:last)
+    assert_equal 1, created.sum { |strategy| strategy.requests.length }
+    assert_predicate manager.select('crushing'), :success?
+  ensure
+    runtime&.stop
+  end
+
+  def test_machine_terminal_event_releases_the_target_game_immediately
+    fixture = JSON.parse(File.read(File.expand_path('fixtures/host_machine_protocol_v1/frames.json', __dir__)))
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: {
+        simple: -> { RecordingStrategy.new }, crushing: -> { RecordingStrategy.new }
+      }
+    )
+    sent = Queue.new
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: manager, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: ->(target, line) { sent << [target, line] }
+    ).start
+    sent.pop
+    runtime.enqueue(machine_notice(fixture.fetch('registered_line')))
+    fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    wait_for { manager.active? }
+    runtime.enqueue(machine_notice(fixture.fetch('ack_line')))
+    fixture.fetch('event_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    wait_for { !manager.active? }
+    assert_predicate manager.select('crushing'), :success?
+  ensure
+    runtime&.stop
+  end
+
+  def test_runtime_stop_cancels_blocked_process_without_recovery_output_in_both_modes
+    fixture = JSON.parse(File.read(File.expand_path('fixtures/host_machine_protocol_v1/frames.json', __dir__)))
+    process_fixture = File.expand_path('fixtures/process_agents/protocol_agent.rb', __dir__)
+    %w[human machine].each do |mode|
+      manager = UnobotV2::StrategyManager.new(
+        selected: 'simple', factories: {
+          simple: lambda do
+            UnobotV2::ProcessAgent.new(
+              argv: [RbConfig.ruby, process_fixture, 'timeout'], name: "blocked-#{mode}",
+              request_timeout: 10, shutdown_timeout: 0.1
+            )
+          end
+        }
+      )
+      sent = Queue.new
+      runtime = UnobotV2::Runtime.new(
+        messaging: mode, strategy: manager, channels: ['#uno'],
+        own_nick: mode == 'human' ? 'unobot' : 'Alice', host_nicks: ['Host'],
+        transport: ->(target, line) { sent << [target, line] }
+      ).start
+      sent.pop if mode == 'machine'
+      if mode == 'human'
+        human_snapshot(runtime)
+      else
+        runtime.enqueue(machine_notice(fixture.fetch('registered_line')))
+        fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+      end
+      wait_for do
+        manager.diagnostics[:sessions].values.any? do |entry|
+          entry[:diagnostics][:running]
+        end
+      end
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      assert_predicate runtime.stop, :success?
+      assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2
+      outputs = []
+      outputs << sent.pop until sent.empty?
+      refute outputs.any? { |_target, line| line.include?(' ACTION ') }, mode
+      refute outputs.any? { |_target, line| %w[us ca .uno\ machine\ register].include?(line) }, mode
+      assert outputs.all? { |_target, line| line == '.uno machine unregister' }, mode if mode == 'machine'
+      assert manager.diagnostics[:shutdown]
+    ensure
+      runtime&.stop
+    end
+  end
+
+  def test_machine_to_human_fallback_cancels_machine_strategy_session
+    fixture = JSON.parse(File.read(File.expand_path('fixtures/host_machine_protocol_v1/frames.json', __dir__)))
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: { simple: -> { RecordingStrategy.new } }
+    )
+    sent = Queue.new
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: manager, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: ->(target, line) { sent << [target, line] },
+      fallback_enabled: true
+    ).start
+    sent.pop
+    runtime.enqueue(machine_notice(fixture.fetch('registered_line')))
+    fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    wait_for { manager.active? }
+    assert_predicate runtime.transition_to('human'), :success?
+    refute manager.active?
+    assert_predicate manager.select('simple'), :success?
+  ensure
+    runtime&.stop
+  end
+
+  private
+
+  def human_snapshot(runtime)
+    runtime.enqueue(human_event(
+      'UNO_STATUS_V1 phase=active current=unobot top=r7 mode=normal ' \
+      'stacked_cards=0 already_picked=0 players=unobot:2,Bob:2', private: true
+    ))
+    runtime.enqueue(human_event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true))
+    runtime.enqueue(human_event("\x034[2] \x0312[5]", private: true))
+  end
+
+  def human_event(text, private: false)
+    UnobotV2::Human::Event.new(
+      channel: '#uno', source: 'Host', recipient: 'unobot', text: text, private: private
+    )
+  end
+
+  def machine_notice(text)
+    UnobotV2::Machine::Event.new(source: 'Host', recipient: 'Alice', text: text)
+  end
+
+  def wait_for(timeout: 2)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    until yield
+      raise 'timed out waiting for async runtime' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+      Thread.pass
+    end
+  end
 end

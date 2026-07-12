@@ -7,6 +7,7 @@ module UnobotV2
   module Machine
     class Adapter < MessagingAdapter
       Result = Struct.new(:code, :message, :line, :request, :retryable, :event,
+                          :game_id, :channel,
                           keyword_init: true) do
         def success? = code == :ok
         def error? = !success?
@@ -76,12 +77,18 @@ module UnobotV2
         return failure(:disconnected, 'IRC is disconnected') unless @connected
         return failure(:stopped, 'adapter is stopped') if lifecycle == :stopped
 
+        previous_request = @active_request
+        previous_game_id = @game_id
         invalidate_decision!
         @game_id = nil
         @frame_buffer.clear
         @lifecycle = :registering
         result = send_line(channel, '.uno machine register')
         @registration_started_at = now if result.success?
+        if previous_game_id
+          status(:session_cancelled, event: 'registration_reset', request: previous_request,
+                 game_id: previous_game_id, channel: channel)
+        end
         result
       end
 
@@ -177,8 +184,12 @@ module UnobotV2
       end
 
       def disconnect!
+        request = @active_request
+        previous_game_id = @game_id
         @connected = false
         invalidate_session!(:disconnected)
+        status(:session_cancelled, event: 'disconnected', request: request,
+               game_id: previous_game_id, channel: channel) if previous_game_id
         success(event: :disconnected)
       end
 
@@ -196,8 +207,14 @@ module UnobotV2
       end
 
       def unregister!
+        request = @active_request
+        previous_game_id = @game_id
         result = send_line(channel, '.uno machine unregister')
-        invalidate_session!(:unregistered) if result.success?
+        if result.success?
+          invalidate_session!(:unregistered)
+          status(:session_cancelled, event: 'unregistered', request: request,
+                 game_id: previous_game_id, channel: channel) if previous_game_id
+        end
         result
       end
 
@@ -216,8 +233,12 @@ module UnobotV2
       end
 
       def stop!
+        request = @active_request
+        previous_game_id = @game_id
         invalidate_session!(:stopped)
         @lifecycle = :stopped
+        status(:session_cancelled, event: 'stopped', request: request,
+               game_id: previous_game_id, channel: channel) if previous_game_id
         success(event: :stopped)
       end
 
@@ -292,7 +313,8 @@ module UnobotV2
           @on_request&.call(request)
         rescue StandardError => error
           @callback_errors << error
-          return fail_closed!(:strategy_error, error.message, reregister: true)
+          return fail_closed!(:strategy_error, error.message,
+                              reregister: token_valid?(@active_lifecycle_token))
         end
         success(request: request)
       rescue Canonical::ValidationError, KeyError => error
@@ -335,8 +357,11 @@ module UnobotV2
             return failure(:stale_error)
           end
           if TERMINAL_ERROR_CODES.include?(message.code)
+            request = @active_request
+            previous_game_id = @game_id
             invalidate_session!(message.code.to_sym)
-            status(:terminal_error, event: message.code)
+            status(:terminal_error, event: message.code, request: request,
+                   game_id: previous_game_id, channel: channel)
             return failure(message.code.to_sym, message.code)
           end
           fail_closed!(message.code.to_sym, message.code,
@@ -368,9 +393,12 @@ module UnobotV2
         event = payload.fetch('event')
         return failure(:unknown_event) unless TERMINAL_EVENTS.include?(event)
 
+        request = @active_request
+        previous_game_id = @game_id
         invalidate_session!(event.to_sym)
         @lifecycle = :stopped if event == 'plugin_unloaded'
-        status(:terminal_event, event: event)
+        status(:terminal_event, event: event, request: request,
+               game_id: previous_game_id, channel: channel)
         if TRANSIENT_TERMINAL_EVENTS.include?(event) && @connected
           registration = register!
           return registration if registration.error?
@@ -393,9 +421,12 @@ module UnobotV2
       end
 
       def fail_closed!(code, message, reregister:)
+        request = @active_request
+        previous_game_id = @game_id
         @last_error = code.to_s.freeze
         invalidate_session!(:recovering)
-        status(:fail_closed, event: code)
+        status(:fail_closed, event: code, request: request,
+               game_id: previous_game_id, channel: channel)
         if reregister && @connected && lifecycle != :stopped
           recovery = register!
           return recovery if recovery.error?

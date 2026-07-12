@@ -7,7 +7,7 @@ require_relative 'machine/adapter'
 module UnobotV2
   module MessagingFactory
     COMMON_KEYS = %i[channel own_nick host_nicks transport on_request].freeze
-    HUMAN_KEYS = (COMMON_KEYS + %i[reducer encoder]).freeze
+    HUMAN_KEYS = (COMMON_KEYS + %i[on_lifecycle reducer encoder]).freeze
     MACHINE_KEYS = (COMMON_KEYS + %i[
       on_status frame_buffer clock ack_timeout registration_timeout
       rename_recovery_timeout rename_retry_interval
