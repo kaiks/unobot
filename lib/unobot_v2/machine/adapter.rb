@@ -149,7 +149,9 @@ module UnobotV2
           @lifecycle = :unregistered
           return failure(:rename_recovery_timeout, 'host player rename did not become visible')
         end
-        if lifecycle == :rename_recovery && @rename_retry_at && now >= @rename_retry_at
+        if rename_recovering? && %i[registering rename_recovery].include?(lifecycle) &&
+           @rename_retry_at && now >= @rename_retry_at
+          @rename_retry_at = now + @rename_retry_interval
           retried = register!
           return retried if retried.error?
 

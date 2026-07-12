@@ -566,16 +566,21 @@ class UnobotV2MachineIngressTest < Minitest::Test
   end
 
   def adapter(channel, on_request: ->(request) { @requests << [request, Thread.current] },
-              host_nicks: ['Host'], on_status: nil)
+              host_nicks: ['Host'], on_status: nil, **options)
     UnobotV2::Machine::Adapter.new(
       channel: channel, own_nick: 'Alice', host_nicks: host_nicks,
       transport: ->(target, line) { @sent << [target, line, Thread.current] },
-      on_request: on_request, on_status: on_status
+      on_request: on_request, on_status: on_status, **options
     )
   end
 
   def notice(text, source: 'Host', recipient: 'Alice', **values)
     UnobotV2::Machine::Event.new(source: source, recipient: recipient, text: text, **values)
+  end
+
+  def registered_line(game:, channel:)
+    encoded = Base64.urlsafe_encode64(channel, padding: false)
+    "UNO_MACHINE_V1 REGISTERED game=#{game} channel=#{encoded}"
   end
 
   def test_ordered_private_notice_routing_and_thread_separation
@@ -844,6 +849,50 @@ class UnobotV2MachineIngressTest < Minitest::Test
     ingress.synchronize
     assert_equal :unroutable_frame, @errors.pop.code
     assert_empty uno.frame_buffer.frames
+    ingress.stop
+  end
+
+  def test_two_channel_rename_recovery_proactively_retries_ambiguous_errors
+    time = 0.0
+    clock = -> { time }
+    options = { clock: clock, rename_retry_interval: 1, rename_recovery_timeout: 3 }
+    one = adapter('#one', **options)
+    two = adapter('#two', **options)
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#one' => one, '#two' => two }, own_nick: 'Alice', host_nicks: ['Host'],
+      on_error: ->(error) { @errors << error }
+    ).start
+    2.times { @sent.pop }
+    ingress.enqueue(notice(registered_line(game: 'gameOne', channel: '#one')))
+    ingress.enqueue(notice(registered_line(game: 'gameTwo', channel: '#two')))
+    wait_until { one.registered? && two.registered? }
+
+    ingress.enqueue(notice('', kind: :nick, old_nick: 'Alice', new_nick: 'Alice2'))
+    ingress.synchronize
+    assert_equal %i[registering registering], [one.lifecycle, two.lifecycle]
+    2.times { @sent.pop }
+    ingress.enqueue(notice('UNO_MACHINE_V1 ERROR game=- decision=- code=not_player retry=0', recipient: 'Alice2'))
+    ingress.synchronize
+    assert_equal :unroutable_frame, @errors.pop.code
+
+    time = 1.1
+    ingress.tick
+    ingress.synchronize
+    assert_equal ['.uno machine register', '.uno machine register'], 2.times.map { @sent.pop[1] }
+    ingress.enqueue(notice(registered_line(game: 'gameOne', channel: '#one'), recipient: 'Alice2'))
+    ingress.enqueue(notice(registered_line(game: 'gameTwo', channel: '#two'), recipient: 'Alice2'))
+    wait_until { one.registered? && two.registered? }
+    refute_predicate one, :rename_recovering?
+    refute_predicate two, :rename_recovering?
+
+    ingress.enqueue(notice('', kind: :nick, old_nick: 'Alice2', new_nick: 'Alice3'))
+    ingress.synchronize
+    2.times { @sent.pop }
+    time = 4.2
+    ingress.tick
+    ingress.synchronize
+    assert_equal %i[unregistered unregistered], [one.lifecycle, two.lifecycle]
+    assert @sent.empty?, 'deadline expiry must not emit another registration attempt'
     ingress.stop
   end
 
