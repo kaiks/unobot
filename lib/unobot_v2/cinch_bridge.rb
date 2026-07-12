@@ -260,7 +260,7 @@ module UnobotV2
     end
 
     def shutdown
-      runtime.stop if @started
+      runtime.stop
       @started = false
     end
 
