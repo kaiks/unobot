@@ -211,28 +211,50 @@ Dir.mktmpdir('uno-stage7-e2e') do |directory|
       end
     end
 
-    sleep 0.5
-    records = File.readlines(artifact, chomp: true).map { |line| JSON.parse(line) }
+    shadow_name = UnobotV2::Configuration.shadow_strategy(ENV)
+    drain_deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+    records = []
+    loop do
+      records = File.readlines(artifact, chomp: true).map { |line| JSON.parse(line) }
+      differentials = records.count { |record| record['type'] == 'differential' }
+      shadows = records.select { |record| record['type'] == 'shadow' }
+      break unless shadow_name
+      break if shadows.length >= differentials
+      raise 'shadow observations did not drain before deadline' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= drain_deadline
+
+      sleep 0.02
+    end
     differential = records.select { |record| record['type'] == 'differential' }
     raise 'no machine decisions were differentially checked' if differential.empty?
     raise 'differential mismatch was recorded' unless differential.all? { |record| record['equal'] }
+    raise 'strategy failure was recorded' if records.any? { |record| record['type'] == 'strategy_error' }
+    shadow = records.select { |record| record['type'] == 'shadow' }
+    if shadow_name
+      unless shadow.length == differential.length
+        raise "shadow count #{shadow.length} did not match machine decision count #{differential.length}"
+      end
+      failures = shadow.reject { |record| record['status'] == 'ok' }
+      raise "shadow gate recorded #{failures.length} errors or drops" unless failures.empty?
+    end
     raise 'host did not confirm requested reload' if reload_sent && !reload_confirmed
 
+    destination = ENV['UNO_STAGE7_ARTIFACT_DIR']
+    retained_artifacts = if destination
+                           FileUtils.mkdir_p(destination)
+                           FileUtils.cp(artifact, destination)
+                           FileUtils.cp(log_path, destination)
+                           { retained: true, decisions: File.join(destination, File.basename(artifact)),
+                             processes: File.join(destination, File.basename(log_path)) }
+                         else
+                           { retained: false }
+                         end
     output = {
       result: 'ok', port: port, human_decisions: decisions,
       machine_decisions: differential.length,
-      shadow_observations: records.count { |record| record['type'] == 'shadow' },
+      shadow_observations: shadow.length,
       seed: SEED, reload_exercised: reload_confirmed,
-      artifacts: { decisions: artifact, processes: log_path }
+      artifacts: retained_artifacts
     }
-    destination = ENV['UNO_STAGE7_ARTIFACT_DIR']
-    if destination
-      FileUtils.mkdir_p(destination)
-      FileUtils.cp(artifact, destination)
-      FileUtils.cp(log_path, destination)
-      output[:artifacts] = { decisions: File.join(destination, File.basename(artifact)),
-                             processes: File.join(destination, File.basename(log_path)) }
-    end
     puts JSON.pretty_generate(output)
   ensure
     client&.socket&.close
