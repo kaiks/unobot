@@ -9,7 +9,10 @@ sleep 10 if mode == 'non_reading'
 
 while (line = $stdin.gets)
   request = JSON.parse(line)
-  break if request['type'] == 'game_end'
+  if request['type'] == 'game_end'
+    next if %w[persistent_valid persistent_slow].include?(mode)
+    break
+  end
   next unless request['type'] == 'request_action'
 
   case mode
@@ -43,6 +46,11 @@ while (line = $stdin.gets)
     puts JSON.generate('action' => 'play', 'card' => 'b9')
   when 'working_directory'
     puts JSON.generate('action' => (File.exist?('working-directory-marker') ? 'draw' : 'pass'))
+  when 'persistent_valid'
+    puts JSON.generate('action' => 'draw')
+  when 'persistent_slow'
+    sleep 0.1
+    puts JSON.generate('action' => 'draw')
   end
   $stdout.flush
 end

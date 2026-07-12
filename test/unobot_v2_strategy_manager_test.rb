@@ -79,6 +79,25 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     manager&.shutdown
   end
 
+  def test_neural_capacity_prevents_multiple_channels_from_spawning_models
+    created = []
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', limits: { neural: 1 },
+      factories: { neural: -> { RecordingStrategy.new.tap { |strategy| created << strategy } } }
+    )
+    manager.decide(machine_request(game: 'one'))
+    second = machine_request(game: 'two')
+    metadata = second.metadata.merge(channel: '#other')
+    second = UnobotV2::Canonical::DecisionRequest.new(**second.state_h, metadata: metadata)
+
+    error = assert_raises(UnobotV2::Configuration::Error) { manager.decide(second) }
+    assert_match(/at most 1 active game/, error.message)
+    assert_equal 1, created.length
+    assert_equal ['machine:#uno:one'], manager.active_game_keys
+  ensure
+    manager&.shutdown
+  end
+
   def test_new_machine_game_cancels_stale_active_game_conservatively
     first = RecordingStrategy.new
     manager = UnobotV2::StrategyManager.new(selected: 'simple', factories: { simple: -> { first } })

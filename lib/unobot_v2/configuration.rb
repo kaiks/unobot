@@ -6,7 +6,7 @@ module UnobotV2
 
     MESSAGING = %w[human machine].freeze
     RUNTIMES = %w[legacy v2].freeze
-    STRATEGIES = %w[legacy simple crushing].freeze
+    STRATEGIES = %w[legacy simple crushing neural].freeze
     TRUE_VALUES = %w[1 true yes on].freeze
 
     module_function
@@ -26,15 +26,19 @@ module UnobotV2
       value = env.fetch('UNO_STRATEGY', 'legacy').to_s.downcase
       return value if STRATEGIES.include?(value)
 
-      raise Error, "invalid UNO_STRATEGY #{value.inspect}; expected legacy, simple, or crushing"
+      raise Error, "invalid UNO_STRATEGY #{value.inspect}; expected legacy, simple, crushing, or neural"
     end
 
     def fallback_enabled?(env = ENV)
-      value = env.fetch('UNO_MACHINE_HUMAN_FALLBACK', 'false').to_s.downcase
+      boolean(env.fetch('UNO_MACHINE_HUMAN_FALLBACK', 'false'), 'UNO_MACHINE_HUMAN_FALLBACK')
+    end
+
+    def boolean(value, label)
+      value = value.to_s.downcase
       return true if TRUE_VALUES.include?(value)
       return false if %w[0 false no off].include?(value)
 
-      raise Error, "invalid UNO_MACHINE_HUMAN_FALLBACK #{value.inspect}"
+      raise Error, "invalid #{label} #{value.inspect}"
     end
 
     def normalize_messaging(value)

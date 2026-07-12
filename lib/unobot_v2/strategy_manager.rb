@@ -20,11 +20,13 @@ module UnobotV2
 
     def self.from_env(env: ENV, **options)
       selected = Configuration.strategy(env)
-      new(selected: selected, factories: StrategyFactory.factories(env: env), **options)
+      new(selected: selected, factories: StrategyFactory.factories(env: env),
+          limits: StrategyFactory.limits, **options)
     end
 
-    def initialize(selected:, factories:, on_status: nil)
+    def initialize(selected:, factories:, limits: {}, on_status: nil)
       @factories = factories.transform_keys { |key| key.to_s.downcase }.freeze
+      @limits = limits.transform_keys { |key| key.to_s.downcase }.transform_values { |value| Integer(value) }.freeze
       @on_status = on_status
       @mutex = Mutex.new
       @sessions = {}
@@ -173,6 +175,12 @@ module UnobotV2
         end
 
         name = @selected_name
+        limit = @limits[name]
+        active_count = @sessions.values.count { |active| active.name == name }
+        if limit && active_count >= limit
+          raise Configuration::Error,
+                "#{name} strategy supports at most #{limit} active game#{limit == 1 ? '' : 's'}"
+        end
         strategy = checkout_locked(name)
         created = Session.new(key: key, scope: scope, name: name, strategy: strategy).freeze
         # Start is bounded and serialized with publication. game_end/cancel can
@@ -279,7 +287,7 @@ module UnobotV2
       return value if Configuration::STRATEGIES.include?(value)
 
       raise Configuration::Error,
-            "invalid strategy #{name.inspect}; expected legacy, simple, or crushing"
+            "invalid strategy #{name.inspect}; expected legacy, simple, crushing, or neural"
     end
 
     def validate_supported!(name)

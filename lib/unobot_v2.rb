@@ -3,6 +3,7 @@
 require_relative 'unobot_v2/canonical'
 require_relative 'unobot_v2/action_validator'
 require_relative 'unobot_v2/process_agent'
+require_relative 'unobot_v2/neural_agent'
 require_relative 'unobot_v2/strategy_factory'
 require_relative 'unobot_v2/strategy_manager'
 require_relative 'unobot_v2/rules'
