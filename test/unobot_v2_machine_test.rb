@@ -188,13 +188,15 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     @adapter = build_adapter
   end
 
-  def build_adapter(channel: '#uno', on_request: ->(request) { @requests << request }, frame_buffer: nil)
+  def build_adapter(channel: '#uno', on_request: ->(request) { @requests << request },
+                    frame_buffer: nil, **extra)
     options = {
       channel: channel, own_nick: 'Alice', host_nicks: ['Host'],
       transport: ->(target, line) { @sent << [target, line, Thread.current] },
       on_request: on_request, on_status: ->(status) { @statuses << status }
     }
     options[:frame_buffer] = frame_buffer if frame_buffer
+    options.merge!(extra)
     UnobotV2::Machine::Adapter.new(**options)
   end
 
@@ -320,6 +322,21 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal '.uno machine register', @sent.last[1]
   end
 
+  def test_lost_ack_times_out_into_registration_sync_without_replaying_action
+    time = 0.0
+    adapter = build_adapter(clock: -> { time }, ack_timeout: 1)
+    register(adapter)
+    request = deliver_state(adapter).request
+    adapter.submit({ action: 'draw' }, decision_id: request.decision_id)
+    assert_equal 1, @sent.count { |_target, line, _thread| line.include?(' ACTION ') }
+    time = 2
+    result = adapter.tick
+    assert_equal :ack_timeout, result.code
+    assert_equal :registering, adapter.lifecycle
+    assert_equal '.uno machine register', @sent.last[1]
+    assert_equal 1, @sent.count { |_target, line, _thread| line.include?(' ACTION ') }
+  end
+
   def test_wrong_game_stale_ack_and_unsafe_actions_are_structured_refusals
     register
     request = deliver_state.request
@@ -385,11 +402,14 @@ class UnobotV2MachineIngressTest < Minitest::Test
 
     ingress.enqueue(notice(@fixture.fetch('registered_line'), source: 'Mallory'))
     ingress.enqueue(notice(@fixture.fetch('registered_line'), recipient: 'Bob'))
+    ingress.enqueue(notice(@fixture.fetch('registered_line'), recipient: nil))
+    ingress.enqueue(notice(@fixture.fetch('registered_line'), channel: '#uno'))
     ingress.enqueue(notice('UNO_MACHINE_V1 ERROR game=- decision=- code=no_game retry=0'))
-    until @errors.size >= 3
+    until @errors.size >= 5
       Thread.pass
     end
-    assert_equal %i[unauthorized_host wrong_recipient unroutable_frame], 3.times.map { @errors.pop.code }
+    assert_equal %i[unauthorized_host wrong_recipient wrong_recipient public_frame unroutable_frame],
+                 5.times.map { @errors.pop.code }
     assert_nil uno.game_id
     assert_nil other.game_id
 

@@ -81,6 +81,7 @@ module UnobotV2
 
         event = envelope.event
         return process_lifecycle(event) unless event.kind == :notice
+        return report(:public_frame, event.text) if event.channel
         return report(:unauthorized_host, event.text) unless host?(event.source)
         return report(:wrong_recipient, event.text) unless recipient?(event.recipient)
 
@@ -188,7 +189,7 @@ module UnobotV2
       end
 
       def recipient?(nick)
-        nick.nil? || nick.to_s.casecmp?(@own_nick)
+        !nick.nil? && nick.to_s.casecmp?(@own_nick)
       end
 
       def report(code, message)

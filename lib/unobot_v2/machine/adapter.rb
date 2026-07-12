@@ -18,13 +18,16 @@ module UnobotV2
         disconnected plugin_unloaded
       ].freeze
       HISTORY_LIMIT = 64
+      DEFAULT_ACK_TIMEOUT = 30.0
 
       attr_reader :channel, :own_nick, :host_nick, :game_id, :lifecycle,
                   :active_request, :last_error, :frame_buffer
       attr_writer :lifecycle_token, :token_validator
 
       def initialize(channel:, own_nick:, host_nicks:, transport:, on_request: nil,
-                     on_status: nil, frame_buffer: FrameBuffer.new)
+                     on_status: nil, frame_buffer: FrameBuffer.new,
+                     clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) },
+                     ack_timeout: DEFAULT_ACK_TIMEOUT)
         @channel = channel.to_s.downcase.freeze
         @own_nick = own_nick.to_s.dup.freeze
         @host_nicks = Array(host_nicks).map { |nick| nick.to_s.downcase }.freeze
@@ -35,6 +38,9 @@ module UnobotV2
         @on_request = on_request
         @on_status = on_status
         @frame_buffer = frame_buffer
+        @clock = clock
+        @ack_timeout = Float(ack_timeout)
+        raise ArgumentError, 'ack timeout must be positive' unless @ack_timeout.positive?
         @lifecycle = :unregistered
         @seen_decisions = []
         @submitted_decision_id = nil
@@ -100,6 +106,7 @@ module UnobotV2
         return sent if sent.error?
 
         @submitted_decision_id = decision_id
+        @action_sent_at = now
         @lifecycle = :awaiting_ack
         success(line: encoded.value)
       rescue Canonical::ValidationError => error
@@ -108,9 +115,14 @@ module UnobotV2
 
       def tick
         expired = frame_buffer.expire!
-        return success if expired.empty?
+        unless expired.empty?
+          return fail_closed!(:missing_chunks, 'machine frame expired before completion', reregister: true)
+        end
+        if lifecycle == :awaiting_ack && @action_sent_at && now - @action_sent_at >= @ack_timeout
+          return fail_closed!(:ack_timeout, 'action acknowledgement was lost', reregister: true)
+        end
 
-        fail_closed!(:missing_chunks, 'machine frame expired before completion', reregister: true)
+        success
       end
 
       def resync!(reason = 'manual_resync')
@@ -294,6 +306,7 @@ module UnobotV2
       def invalidate_decision!
         @active_request = nil
         @submitted_decision_id = nil
+        @action_sent_at = nil
         @active_lifecycle_token = nil
       end
 
@@ -312,6 +325,10 @@ module UnobotV2
 
       def token_valid?(token)
         !@token_validator || @token_validator.call(token)
+      end
+
+      def now
+        Float(@clock.call)
       end
 
       def status(code, **values)

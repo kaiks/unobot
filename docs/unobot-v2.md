@@ -118,7 +118,9 @@ recovery register afresh. Queue overflow advances the ingress lifecycle epoch
 before recovery, so an in-flight strategy result cannot escape afterward.
 Call `runtime.tick` from the IRC integration's periodic timer; expiry checks
 are enqueued on the same ordered path and recover incomplete frames after the
-30-second deadline even when no further NOTICE arrives.
+30-second deadline even when no further NOTICE arrives. The same tick treats
+a 30-second missing ACK as uncertain execution: it invalidates and
+re-registers but never replays the action.
 
 Private NOTICE has no channel, so the machine ingress never uses a most-recent
 channel guess. Registration errors without a game ID are routed only when one
