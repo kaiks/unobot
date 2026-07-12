@@ -75,13 +75,16 @@ and the initial two-player/single-process limit.
 
 ```bash
 # Build the pinned combined Ruby/Python inference image from an accepted Jedna checkout
-JEDNA_ROOT=../jedna UNO_IMAGE=unobot-neural:17.5m deploy/build-image
+export JEDNA_ROOT=$(realpath ../jedna)
+export UNO_IMAGE=unobot-neural:17.5m
+deploy/build-image
 
 # Configure the external read-only model and IRC allowlists, then start safely in shadow mode
-export UNO_CHECKPOINT=../jedna/extension-gems/jedna-tournaments/checkpoints/overnight-dagger/checkpoint_17500000_steps.zip
+export UNO_CHECKPOINT=$(realpath "$JEDNA_ROOT/extension-gems/jedna-tournaments/checkpoints/overnight-dagger/checkpoint_17500000_steps.zip")
+export UNO_IMAGE=$(docker image inspect "$UNO_IMAGE" --format '{{.Id}}')
 export IRC_SERVER=irc.example.test UNO_CHANNELS='#uno-test'
 export UNO_HOST_NICKS=ZbojeiJureq UNO_ADMIN_NICKS=operator
-docker compose -f deploy/compose.yaml up -d
+deploy/compose-run up -d
 ```
 
 This bot is an outbound IRC client; no container port is published. The model

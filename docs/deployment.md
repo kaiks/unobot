@@ -14,12 +14,16 @@ second network protocol and duplicate those lifecycle guarantees without
 isolating any state that the accepted strategy interface shares.
 
 The image contains no checkpoint and no copied agent implementation from this
-repository. `deploy/build-image` requires the accepted Jedna commit
-`17ada2012112abf1df2cd2a31342fcad2f3ed18a`, creates a git archive, and gives
-BuildKit only the archived `examples` directory. The Dockerfile allowlists the
-six files needed by Simple, Crushing, and neural inference plus Jedna's
-license. Training code, repository metadata, dirty working-tree files, and the
-checkpoint are outside the image and build context.
+repository. `deploy/build-image` archives an explicit unobot commit
+(`UNOBOT_REF`, clean `HEAD` by default), rather than sending the mutable
+worktree. It requires the accepted Jedna commit
+`17ada2012112abf1df2cd2a31342fcad2f3ed18a` and creates a separate named context
+containing exactly the six files needed by Simple, Crushing, and neural
+inference plus Jedna's license. Training code, repository metadata, dirty
+working-tree files, and the checkpoint never enter either BuildKit context.
+The image labels record both exact revisions. A nonaccepted `JEDNA_REF` is
+refused unless `UNO_ALLOW_UNACCEPTED_JEDNA_REF=true` explicitly acknowledges
+that unsupported provenance.
 
 That accepted Jedna SHA is not on the current public `origin/main` as of this
 handoff. A builder needs a local checkout containing the object, or the commit
@@ -42,7 +46,16 @@ The deployment pins:
 - Debian Python 3.11.2, `tini` 0.19.0, and installation package versions;
 - Torch 2.8.0+cpu, Stable-Baselines3 2.7.0, sb3-contrib 2.7.0,
   Gymnasium 1.2.0, NumPy 2.3.5, and every resolved Python dependency in
-  `deploy/requirements-neural.lock`.
+  `deploy/requirements-neural.lock`, with target-wheel SHA-256 verification.
+
+The build is specifically `linux/amd64`: the base digest, Debian package
+versions, and Python wheel hashes do not claim another architecture. Debian
+APT metadata and downloaded Ruby gem bodies are still fetched from live
+repositories. The base, package versions, Gemfile lock, Cinch git revision,
+and resulting image ID are recorded, but Bundler 2.3.7 does not provide a
+complete content-hash lock for those Ruby downloads. Rebuilding therefore
+requires trusted package/gem endpoints; retain and deploy the reviewed image
+ID or registry RepoDigest rather than treating a later rebuild as identical.
 
 Build and smoke-test the actual checkpoint:
 
@@ -53,6 +66,10 @@ export UNO_CHECKPOINT="$JEDNA_ROOT/extension-gems/jedna-tournaments/checkpoints/
 
 deploy/build-image
 deploy/verify-image
+deploy/verify-startup-signals
+
+# Compose accepts only an immutable local image ID or registry RepoDigest.
+export UNO_IMAGE=$(docker image inspect unobot-neural:17.5m --format '{{.Id}}')
 ```
 
 The expected model is 3,225,534 bytes with SHA-256
@@ -93,13 +110,15 @@ combined container on this host used about 269 MiB while warm and idle. Keep
 1 GiB for allocator/model/IRC spikes; treat 768 MiB as an experimental floor,
 not the rollout default. Torch thread counts default to one.
 
-Start and inspect:
+`UNO_CHECKPOINT` must be an absolute existing file. `deploy/compose-run`
+enforces that and refuses mutable image tags; Compose also disables automatic
+bind-path creation. Start and inspect:
 
 ```bash
-docker compose -f deploy/compose.yaml up -d
-docker compose -f deploy/compose.yaml exec unobot /unobot/bin/unobotctl health
-docker compose -f deploy/compose.yaml exec unobot /unobot/bin/unobotctl ready
-docker compose -f deploy/compose.yaml exec unobot /unobot/bin/unobotctl status
+deploy/compose-run up -d
+deploy/compose-run exec unobot /unobot/bin/unobotctl health
+deploy/compose-run exec unobot /unobot/bin/unobotctl ready
+deploy/compose-run exec unobot /unobot/bin/unobotctl status
 ```
 
 Do not put IRC passwords, model paths, or tokens in operator requests. This
@@ -133,20 +152,35 @@ Commands:
 - `restart`: single-shot graceful process restart, refused while any live or
   shadow game is active.
 
+The accept loop feeds a bounded client queue and four workers, so one slow
+health command or client cannot block status. Input and response I/O default
+to separate one-second deadlines (`UNO_OPERATIONS_INPUT_TIMEOUT` and
+`UNO_OPERATIONS_OUTPUT_TIMEOUT`); the 4 KiB request and 64 KiB response bounds
+are independent. Reload/select execution uses the underlying neural cold/warm
+and process deadlines. `UNO_OPERATIONS_SHUTDOWN_TIMEOUT` defaults to 30 seconds
+and must remain above the configured cold timeout; shutdown closes client I/O
+and joins every worker without killing an inference thread.
+
 The surface never returns argv, environment values, checkpoint paths, hands,
 stderr contents, or error messages that might contain them. Docker health uses
 `health`, not `ready`: IRC outages make the service unready without causing a
 model restart storm. Use `bin/unobotctl COMMAND [NAME]` through `docker exec`.
 
-TERM/INT travel through `tini` to a self-pipe signal handler. Cinch stops its
-reconnect loop, then the starter ensure path stops operations, bridge, strategy
-managers, and the model process group. The bounded smoke exited zero in under
-one second and the model PID was gone. Keep Compose's 20-second grace period.
+TERM/INT traps and the self-pipe are installed before model health begins. A
+startup signal records termination without raising into Torch; bounded health
+finishes, IRC startup is skipped/stopped, and ensure shuts down operations,
+bridge, managers, and the model group. Normal TERM exits zero. The operator
+restart command holds manager admission closed and exits 75 after cleanup;
+Compose's bounded `on-failure:3` policy restarts it. Configuration exit 78 is
+also retried at most three times instead of looping forever. Keep the 20-second
+grace period at or above the neural cold timeout.
 
-Operational JSON belongs in a restricted artifact directory. Normal Cinch
-logs persist in the `unobot-logs` volume; configure host-level rotation and
-retention. Shadow JSON can reveal channels, game/decision identifiers, and
-actions even though it excludes hands. Do not place it in public logs.
+Operational JSON belongs in a restricted artifact directory. Normal file logs
+persist in `unobot-logs`; `UNO_LOG_MAX_BYTES` defaults to 10 MiB and
+`UNO_LOG_BACKUPS` to three for both files, bounding each log family to four
+files. Docker JSON output is separately capped at three 10 MiB files. Shadow
+JSON can reveal channels, game/decision identifiers, and actions even though
+it excludes hands. Do not place it in public logs.
 
 ## Mandatory rollout gates
 
@@ -191,7 +225,7 @@ state in diagnostics.
 2. Let an active game finish. If safety is already compromised, stop the
    container; never replay a pending action.
 3. Capture sanitized `status`, image ID, and restricted logs.
-4. `docker compose -f deploy/compose.yaml stop` and verify no model PID remains.
+4. `deploy/compose-run stop` and verify no model PID remains.
 5. Roll back to the last reviewed immutable image and restore Simple live with
    no shadow, or the exact legacy human runtime if that is the accepted safe
    service. Do not reuse canonical state across the restart.
