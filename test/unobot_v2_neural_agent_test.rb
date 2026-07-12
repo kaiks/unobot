@@ -6,6 +6,24 @@ require 'tmpdir'
 require_relative '../lib/unobot_v2'
 
 class UnobotV2NeuralAgentTest < Minitest::Test
+  class FailingSpawnProcess
+    attr_reader :name, :starts
+
+    def initialize
+      @name = 'neural'
+      @starts = 0
+    end
+
+    def start_game(_key)
+      @starts += 1
+      raise UnobotV2::ProcessAgent::Error.new(:startup_failed, 'fixture spawn failure')
+    end
+
+    def running? = false
+    def shutdown = nil
+    def diagnostics = { name: name, running: false }
+  end
+
   PROCESS_FIXTURE = File.expand_path('fixtures/process_agents/protocol_agent.rb', __dir__)
   FAKE_PYTHON = File.expand_path('fixtures/process_agents/fake_python.rb', __dir__)
   EXAMPLES_FIXTURE = File.expand_path('fixtures/neural_examples', __dir__)
@@ -77,6 +95,29 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     instant += 1.1
     assert_raises(UnobotV2::ProcessAgent::Error) { agent.decide(request) }
     assert_equal 2, agent.diagnostics[:consecutive_failures]
+    assert_in_delta 2.0, agent.diagnostics[:retry_in_seconds], 0.001
+  end
+
+  def test_spawn_failure_backoff_is_enforced_before_another_spawn_attempt
+    instant = 100.0
+    process = FailingSpawnProcess.new
+    agent = UnobotV2::NeuralAgent.new(
+      process: process, cold_timeout: 1, warm_timeout: 1,
+      backoff_initial: 1, backoff_max: 2, clock: -> { instant }
+    )
+    @agents ||= []
+    @agents << agent
+
+    error = assert_raises(UnobotV2::ProcessAgent::Error) { agent.start_game('one') }
+    assert_equal :startup_failed, error.code
+    assert_equal 1, process.starts
+    error = assert_raises(UnobotV2::ProcessAgent::Error) { agent.start_game('one') }
+    assert_equal :restart_backoff, error.code
+    assert_equal 1, process.starts
+
+    instant += 1.1
+    assert_raises(UnobotV2::ProcessAgent::Error) { agent.start_game('one') }
+    assert_equal 2, process.starts
     assert_in_delta 2.0, agent.diagnostics[:retry_in_seconds], 0.001
   end
 

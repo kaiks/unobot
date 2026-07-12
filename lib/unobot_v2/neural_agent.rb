@@ -20,6 +20,7 @@ module UnobotV2
                    warm_timeout: DEFAULT_WARM_TIMEOUT,
                    backoff_initial: DEFAULT_BACKOFF_INITIAL,
                    backoff_max: DEFAULT_BACKOFF_MAX,
+                   stochastic: false,
                    clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
       @process = process
       @name = process.name
@@ -28,12 +29,15 @@ module UnobotV2
       @backoff_initial = positive_float(backoff_initial, 'initial backoff')
       @backoff_max = positive_float(backoff_max, 'maximum backoff')
       raise ArgumentError, 'maximum backoff must not be smaller than initial backoff' if @backoff_max < @backoff_initial
+      raise ArgumentError, 'stochastic must be boolean' unless [true, false].include?(stochastic)
 
       @clock = clock
+      @stochastic = stochastic
       @mutex = Mutex.new
       @health = :unverified
       @consecutive_failures = 0
       @next_retry_at = nil
+      @current_backoff = nil
       @last_failure = nil
     end
 
@@ -61,6 +65,7 @@ module UnobotV2
         @health = :ready
         @consecutive_failures = 0
         @next_retry_at = nil
+        @current_backoff = nil
         @last_failure = nil
       end
       action
@@ -111,10 +116,6 @@ module UnobotV2
       @process.diagnostics.merge(neural).freeze
     end
 
-    def stochastic=(value)
-      @stochastic = !!value
-    end
-
     private
 
     def validate_topology!(request)
@@ -139,7 +140,12 @@ module UnobotV2
     def record_failure(error)
       @mutex.synchronize do
         @consecutive_failures += 1
-        delay = [@backoff_initial * (2**(@consecutive_failures - 1)), @backoff_max].min
+        @current_backoff = if @current_backoff
+                             [@current_backoff * 2, @backoff_max].min
+                           else
+                             @backoff_initial
+                           end
+        delay = @current_backoff
         @next_retry_at = now + delay
         @health = :failed
         @last_failure = {

@@ -39,6 +39,7 @@ module UnobotV2
           request = @encoder.mask_request(request)
           if request.available_actions.empty?
             @last_error = :no_encodable_action
+            safe_lifecycle(:cancel, prior_request, 'no_encodable_action') if prior_request
             resync!('no_encodable_action')
             return Reduction.new(changed: true, reason: 'no_encodable_action')
           end

@@ -77,8 +77,9 @@ module UnobotV2
         cold_timeout: float_env(env, 'UNO_NEURAL_COLD_TIMEOUT', NeuralAgent::DEFAULT_COLD_TIMEOUT),
         warm_timeout: float_env(env, 'UNO_NEURAL_WARM_TIMEOUT', NeuralAgent::DEFAULT_WARM_TIMEOUT),
         backoff_initial: float_env(env, 'UNO_NEURAL_BACKOFF_INITIAL', NeuralAgent::DEFAULT_BACKOFF_INITIAL),
-        backoff_max: float_env(env, 'UNO_NEURAL_BACKOFF_MAX', NeuralAgent::DEFAULT_BACKOFF_MAX)
-      ).tap { |agent| agent.stochastic = stochastic }
+        backoff_max: float_env(env, 'UNO_NEURAL_BACKOFF_MAX', NeuralAgent::DEFAULT_BACKOFF_MAX),
+        stochastic: stochastic
+      )
     end
 
     def neural_examples(env:, project_root:)

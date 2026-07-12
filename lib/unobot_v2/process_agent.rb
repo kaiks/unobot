@@ -188,7 +188,9 @@ module UnobotV2
       return nil if path.nil?
 
       expanded = File.expand_path(String(path))
-      raise ArgumentError, 'agent working directory must be a readable directory' unless File.directory?(expanded) && File.readable?(expanded)
+      unless File.directory?(expanded) && File.readable?(expanded) && File.executable?(expanded)
+        raise ArgumentError, 'agent working directory must be a readable, traversable directory'
+      end
 
       expanded.freeze
     end
