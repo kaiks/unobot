@@ -1,0 +1,9 @@
+.git
+.bundle
+.claude
+.mutant
+.ruby-lsp
+logs
+tmp
+*.zip
+bot_config2.rb

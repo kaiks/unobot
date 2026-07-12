@@ -73,6 +73,9 @@ ruby uno_ai_test.rb       # AI decision tests
 
 # Run tests in Docker
 docker run --rm unobot sh -c "cd test && ruby basic.rb"
+
+# Run mutation tests during development
+bundle exec mutant run
 ```
 
 ## Architecture

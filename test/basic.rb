@@ -1,9 +1,9 @@
-require '../bot_config'
+require_relative 'test_helper'
+require_relative '../bot_config.rb'
 require_relative '../lib/uno_ai.rb'
 require_relative '../lib/uno_parser.rb'
-require 'test/unit'
 
-class TestStrategy < Test::Unit::TestCase
+class BasicStrategyTest < UnoTest
   def setup
     @proxy = UnoProxy.new(nil)
     @bot = UnoAI.new(@proxy, 0)
@@ -217,7 +217,7 @@ class TestStrategy < Test::Unit::TestCase
     @proxy.top_card = UnoCard.parse('g5')
     prepare_tracker
     @proxy.tracker.default_adversary.card_count = 3
-    @proxy.tracker.stack = @proxy.tracker.stack.shuffle.drop(50)
+    @proxy.tracker.stack = @proxy.tracker.stack.shuffle(random: Random.new(1)).drop(50)
     path = @bot.calculate_best_path_by_probability_chain
     path_s = path[2].map(&:to_s).to_s
     assert_equal(path_s, ['g+2', 'g5', 'y5', 'y5', 'y7'].to_s,

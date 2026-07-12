@@ -14,8 +14,8 @@ WORKDIR $APP_HOME
 
 # Copy over our application code
 ADD . .
-RUN gem install bundler -v 2.4.22
-RUN bundle install
+RUN gem install bundler -v 2.3.7
+RUN bundle config set without development && bundle install
 
 # Create logs directory for tests
 RUN mkdir -p logs

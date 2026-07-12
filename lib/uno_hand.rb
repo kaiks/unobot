@@ -76,10 +76,6 @@ class Hand < Array
     select(&:special_card?)
   end
 
-  def wild!
-    select!(&:special_card?)
-  end
-
   def colors
     map(&:color).uniq
   end

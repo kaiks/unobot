@@ -1,14 +1,18 @@
 # TODO: separate logger from the rest
 # require 'extend_logger.rb'
 require 'logger'
+require 'fileutils'
 
-$logger = Logger.new('logs/unobot.log', 'daily', 10)
+log_directory = File.expand_path('../logs', __dir__)
+FileUtils.mkdir_p(log_directory)
+
+$logger = Logger.new(File.join(log_directory, 'unobot.log'), 'daily', 10)
 $logger_queue = Queue.new
 $logger.datetime_format = '%H:%M:%S'
 
 $logger_thread = Thread.new do
   loop do
-    while $DEBUG == true && $bot && $bot.config.engine.busy == false
+    while $DEBUG == true && (engine = $bot&.config&.engine) && engine.busy == false
       $logger.add(Logger::INFO, $logger_queue.pop)
     end
     sleep(0.5)

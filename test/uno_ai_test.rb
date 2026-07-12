@@ -1,10 +1,10 @@
+require_relative 'test_helper'
 require_relative '../lib/uno_ai.rb'
 require_relative '../bot_config.rb'
 require_relative '../lib/misc.rb'
 require_relative '../lib/uno_parser.rb'
-require 'test/unit'
 
-class TestStrategy < Test::Unit::TestCase
+class UnoAITest < UnoTest
   def setup
     @proxy = UnoProxy.new(nil)
     @bot = UnoAI.new(@proxy, 0)

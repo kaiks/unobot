@@ -1,10 +1,10 @@
+require_relative 'test_helper'
 require_relative '../lib/uno_ai.rb'
 require_relative '../bot_config.rb'
 require_relative '../lib/misc.rb'
 require_relative '../lib/uno_parser.rb'
-require 'test/unit'
 
-class TestStrategy < Test::Unit::TestCase
+class ComponentsTest < UnoTest
   def setup
     @proxy = UnoProxy.new(nil)
     @bot = UnoAI.new(@proxy, 0)
@@ -53,6 +53,12 @@ class TestStrategy < Test::Unit::TestCase
     path_s = @bot.get_offensive_path.map(&:to_s).to_s
     assert_equal(path_s, '["gr", "gr", "yr", "yr", "y+2"]',
                  "Wrong path: #{path_s}")
+  end
+
+  def test_wild_cards
+    hand = Hand.from_text(%w[r5 w wd4])
+
+    assert_equal(Hand.from_text(%w[w wd4]), hand.wild)
   end
 
   def test_tracker_1; end

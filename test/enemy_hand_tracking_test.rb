@@ -1,13 +1,13 @@
+require_relative 'test_helper'
 require_relative '../lib/uno_ai.rb'
 require_relative '../bot_config.rb'
 require_relative '../lib/misc.rb'
 require_relative '../lib/uno_parser.rb'
-require 'test/unit'
 
 require_relative '../lib/uno_bot.rb'
 $bot.instance_eval("@name = 'unobot'")
 
-class TestStrategy < Test::Unit::TestCase
+class EnemyHandTrackingTest < UnoTest
   ADVERSARY_NICK = 'Testing'.freeze
   def setup
     @proxy = UnoProxy.new(nil)

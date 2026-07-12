@@ -1,0 +1,17 @@
+integration:
+  name: minitest
+
+includes:
+- .
+
+requires:
+- test/basic
+
+matcher:
+  subjects:
+  - Hand*
+
+mutation:
+  timeout: 15.0
+
+usage: opensource
