@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+image=${UNO_IMAGE:?set UNO_IMAGE to the built image tag or immutable ID}
+checkpoint=${UNO_CHECKPOINT:?set UNO_CHECKPOINT to an absolute checkpoint path}
+case "$checkpoint" in /*) ;; *) echo 'UNO_CHECKPOINT must be absolute' >&2; exit 2 ;; esac
+
+current=''
+cleanup() {
+  test -z "$current" || docker rm -f "$current" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+for delay in ${UNO_SIGNAL_DELAYS:-0 0.05 0.2 0.5}; do
+  current="unobot-startup-signal-$$-$(printf '%s' "$delay" | tr '.' '-')"
+  docker run -d --name "$current" --platform linux/amd64 \
+    --read-only --user 10001:10001 --cap-drop ALL \
+    --security-opt no-new-privileges --memory 1g --pids-limit 128 \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+    --tmpfs /run/unobot:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=10001,gid=10001 \
+    --tmpfs /unobot/logs:rw,nosuid,nodev,size=16m,uid=10001,gid=10001 \
+    --mount "type=bind,source=$checkpoint,target=/models/checkpoint_17500000_steps.zip,readonly" \
+    -e IRC_SERVER=127.0.0.1 -e IRC_PORT=26669 \
+    -e UNO_RUNTIME=v2 -e UNO_MESSAGING=machine -e UNO_STRATEGY=neural \
+    -e UNO_SHADOW_STRATEGY=none -e UNO_CHANNELS='#startup-signal' \
+    -e UNO_HOST_NICKS=Host -e UNO_ADMIN_NICKS=Admin -e UNO_AUTOJOIN=false \
+    "$image" >/dev/null
+  sleep "$delay"
+  model_pids=$(docker top "$current" -eo pid,args 2>/dev/null | awk '/rl_agent.sb3_opponent/ {print $1}' || true)
+  started=$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC)')
+  docker stop -t 20 "$current" >/dev/null
+  elapsed=$(ruby -e 'puts Process.clock_gettime(Process::CLOCK_MONOTONIC) - ARGV[0].to_f' "$started")
+  test "$(docker inspect "$current" --format '{{.State.ExitCode}}')" -eq 0
+  ruby -e 'abort "startup signal stop exceeded 20 seconds" unless ARGV[0].to_f < 20' "$elapsed"
+  for pid in $model_pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "model process $pid survived startup signal at $delay seconds" >&2
+      exit 1
+    fi
+  done
+  printf 'delay=%s exit=0 elapsed=%ss model_reaped=yes\n' "$delay" "$elapsed"
+  docker rm "$current" >/dev/null
+  current=''
+done

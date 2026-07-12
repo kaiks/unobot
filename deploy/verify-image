@@ -5,8 +5,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 image=${UNO_IMAGE:?set UNO_IMAGE to the built image tag or immutable ID}
 checkpoint=${UNO_CHECKPOINT:?set UNO_CHECKPOINT to checkpoint_17500000_steps.zip}
 expected=${UNO_NEURAL_CHECKPOINT_SHA256:-3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f}
-unobot_ref=${UNOBOT_REF:-$(git -C "$root" rev-parse HEAD)}
-jedna_ref=${JEDNA_REF:-17ada2012112abf1df2cd2a31342fcad2f3ed18a}
+unobot_ref=$(git -C "$root" rev-parse "${UNOBOT_REF:-HEAD}^{commit}")
+jedna_ref=$(git -C "${JEDNA_ROOT:-$root/../jedna}" rev-parse "${JEDNA_REF:-17ada2012112abf1df2cd2a31342fcad2f3ed18a}^{commit}")
 
 case "$checkpoint" in /*) ;; *) echo 'UNO_CHECKPOINT must be an absolute path' >&2; exit 2 ;; esac
 

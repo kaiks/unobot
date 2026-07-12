@@ -20,4 +20,22 @@ if [ "$live_strategy" = neural ] || [ "$shadow_strategy" = neural ]; then
 fi
 
 mkdir -p logs
-exec "$@"
+
+child=''
+terminate() {
+  if [ -n "$child" ]; then
+    kill -TERM "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap terminate INT TERM
+
+"$@" &
+child=$!
+set +e
+wait "$child"
+status=$?
+set -e
+trap - INT TERM
+exit "$status"

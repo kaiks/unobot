@@ -4,20 +4,20 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 jedna_root=${JEDNA_ROOT:-"$root/../jedna"}
 accepted_jedna_ref=17ada2012112abf1df2cd2a31342fcad2f3ed18a
-jedna_ref=${JEDNA_REF:-$accepted_jedna_ref}
-unobot_ref=${UNOBOT_REF:-$(git -C "$root" rev-parse HEAD)}
+jedna_ref_input=${JEDNA_REF:-$accepted_jedna_ref}
+unobot_ref_input=${UNOBOT_REF:-HEAD}
 image=${UNO_IMAGE:-unobot-neural:17.5m}
 
+if ! jedna_ref=$(git -C "$jedna_root" rev-parse "$jedna_ref_input^{commit}" 2>/dev/null); then
+  echo "Jedna commit $jedna_ref_input is unavailable; fetch it or set JEDNA_ROOT" >&2
+  exit 2
+fi
+if ! unobot_ref=$(git -C "$root" rev-parse "$unobot_ref_input^{commit}" 2>/dev/null); then
+  echo "unobot commit $unobot_ref_input is unavailable" >&2
+  exit 2
+fi
 if [ "$jedna_ref" != "$accepted_jedna_ref" ] && [ "${UNO_ALLOW_UNACCEPTED_JEDNA_REF:-false}" != true ]; then
   echo "refusing nonaccepted Jedna revision; set UNO_ALLOW_UNACCEPTED_JEDNA_REF=true explicitly" >&2
-  exit 2
-fi
-if ! git -C "$jedna_root" cat-file -e "$jedna_ref^{commit}" 2>/dev/null; then
-  echo "Jedna commit $jedna_ref is unavailable; fetch it or set JEDNA_ROOT" >&2
-  exit 2
-fi
-if ! git -C "$root" cat-file -e "$unobot_ref^{commit}" 2>/dev/null; then
-  echo "unobot commit $unobot_ref is unavailable" >&2
   exit 2
 fi
 
