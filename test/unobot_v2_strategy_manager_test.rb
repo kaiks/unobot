@@ -130,19 +130,31 @@ class UnobotV2StrategyManagerTest < Minitest::Test
   end
 
   def test_simple_and_crushing_use_maintained_programs_with_same_contract_in_both_modes
-    %w[human machine].each do |transport|
-      request = machine_request(
-        transport: transport, playable: ['r5'], actions: %w[play draw]
-      )
-      %w[simple crushing].each do |name|
+    fixtures = Dir[File.expand_path('fixtures/jedna_protocol_v1/*.json', __dir__)].sort
+    %w[simple crushing].each do |name|
+      actions_by_transport = {}
+      %w[human machine].each do |transport|
         strategy = UnobotV2::StrategyFactory.build(name, env: {})
         strategy.start_game("#{transport}-#{name}")
-        action = strategy.decide(request)
-        assert_instance_of UnobotV2::Canonical::Action, action
-        assert_equal({ action: 'play', card: 'r5' }, action.to_h)
-      ensure
-        strategy&.shutdown
+        begin
+          actions_by_transport[transport] = fixtures.map.with_index do |path, index|
+            request = UnobotV2::Canonical::DecisionRequest.from_protocol(
+              JSON.parse(File.read(path)),
+              metadata: {
+                channel: '#uno', transport: transport, game_id: 'contract',
+                game_generation: 1, decision_id: "contract-#{index}"
+              }
+            )
+            action = strategy.decide(request)
+            assert_instance_of UnobotV2::Canonical::Action, action
+            assert_equal action, UnobotV2::ActionValidator.validate(action, request: request)
+            action.to_h
+          end
+        ensure
+          strategy.shutdown
+        end
       end
+      assert_equal actions_by_transport.fetch('human'), actions_by_transport.fetch('machine'), name
     end
   end
 

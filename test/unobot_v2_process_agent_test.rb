@@ -121,6 +121,10 @@ class UnobotV2ProcessAgentTest < Minitest::Test
       UnobotV2::ProcessAgent.new(argv: [RbConfig.ruby, '/definitely/missing.rb'], name: 'bad')
     end
     assert_equal :missing_script, error.code
+    error = assert_raises(UnobotV2::ProcessAgent::Error) do
+      UnobotV2::ProcessAgent.new(argv: ['sh', '/definitely/missing.py'], name: 'bad')
+    end
+    assert_equal :missing_script, error.code
   end
 
   def test_concurrent_decision_and_game_end_never_leave_a_child_or_late_action

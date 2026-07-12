@@ -187,7 +187,7 @@ module UnobotV2
       unless executable_available?(executable)
         raise Error.new(:missing_executable, "agent executable does not exist: #{File.basename(executable)}")
       end
-      return unless ruby_executable?(executable) && @argv[1]
+      return unless @argv[1] && (ruby_executable?(executable) || script_path?(@argv[1]))
       return if File.file?(@argv[1]) && File.readable?(@argv[1])
 
       raise Error.new(:missing_script, "agent script does not exist: #{File.basename(@argv[1])}")
@@ -204,6 +204,10 @@ module UnobotV2
 
     def ruby_executable?(executable)
       File.basename(executable).match?(/\Aruby(?:\d+(?:\.\d+)*)?\z/)
+    end
+
+    def script_path?(argument)
+      argument.include?(File::SEPARATOR) || argument.match?(/\.(?:rb|py)\z/i)
     end
 
     def start_process(expected_generation: nil)
@@ -344,8 +348,8 @@ module UnobotV2
       raise Error.new(:invalid_response, 'agent response must be one JSON object') unless value.is_a?(Hash)
 
       value
-    rescue JSON::ParserError => error
-      raise Error.new(:malformed_output, "agent returned malformed JSON: #{error.message}")
+    rescue JSON::ParserError
+      raise Error.new(:malformed_output, 'agent returned malformed JSON')
     end
 
     def ensure_current!(token)
