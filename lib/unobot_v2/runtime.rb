@@ -10,6 +10,14 @@ module UnobotV2
   # or Machine::Event and enqueue them here; all strategy work is delegated to
   # the selected ordered ingress worker.
   class Runtime
+    class ControlError < StandardError
+      attr_reader :code
+
+      def initialize(code, message)
+        @code = code
+        super(message)
+      end
+    end
     Transition = Struct.new(:code, :message, :mode, keyword_init: true) do
       def success? = code == :ok
       def restart_required? = code == :restart_required
@@ -50,12 +58,23 @@ module UnobotV2
 
     def start
       ingress.start
+      result = ingress.respond_to?(:last_control_result) ? ingress.last_control_result : nil
+      raise ControlError.new(result.code, result.message) if result&.error?
+
       self
     end
 
     def stop
+      if ingress.respond_to?(:worker_thread?) && ingress.worker_thread?
+        Thread.new { ingress.stop }
+        return Transition.new(code: :ok, message: 'stop deferred from ingress worker', mode: mode)
+      end
+
       ingress.stop
-      self
+      result = ingress.respond_to?(:last_control_result) ? ingress.last_control_result : nil
+      return Transition.new(code: result.code, message: result.message, mode: mode) if result&.error?
+
+      Transition.new(code: :ok, mode: mode)
     end
 
     def enqueue(event)
@@ -74,6 +93,28 @@ module UnobotV2
       ingress.adapter_for(channel)
     end
 
+    def resync(channel, reason: 'bridge_resync')
+      normalized = channel.to_s.downcase
+      if mode == 'machine'
+        ingress.execute(invalidate: true) { adapter_for(normalized).register! }
+      else
+        ingress.execute(channel: normalized, invalidate: true) do
+          adapter_for(normalized).resync!(reason)
+        end
+      end
+    end
+
+    def invalidate(channel: nil)
+      if mode == 'machine'
+        ingress.invalidate!
+      elsif channel
+        ingress.invalidate(channel)
+      else
+        @channels.each { |configured| ingress.invalidate(configured) }
+      end
+      true
+    end
+
     # Live machine -> human fallback is intentionally explicit and disabled by
     # default. It unregisters and invalidates every machine session before a
     # completely fresh human reducer requests `us` + `ca`. No state is merged.
@@ -82,6 +123,10 @@ module UnobotV2
     def transition_to(requested_mode)
       requested = Configuration.normalize_messaging(requested_mode)
       return Transition.new(code: :ok, mode: mode) if requested == mode
+      if ingress.respond_to?(:worker_thread?) && ingress.worker_thread?
+        return Transition.new(code: :restart_required,
+                              message: 'messaging transition cannot join its ingress worker', mode: mode)
+      end
       if mode == 'human'
         return Transition.new(code: :restart_required,
                               message: 'human to machine requires an explicit runtime restart', mode: mode)
@@ -92,18 +137,29 @@ module UnobotV2
       end
 
       prepared = ingress.prepare_fallback!
-      unless prepared.success? && prepared.value
+      unless prepared.success?
+        return Transition.new(code: prepared.code, message: prepared.message, mode: mode)
+      end
+      unless prepared.value
         return Transition.new(code: :transport_unavailable,
                               message: 'machine unregister could not be delivered', mode: mode)
       end
 
       ingress.stop(graceful: false)
+      stopped = ingress.last_control_result
+      unless stopped&.success?
+        return Transition.new(code: stopped&.code || :control_error,
+                              message: stopped&.message || 'machine ingress did not stop', mode: mode)
+      end
       @mode = 'human'
       install_ingress
       ingress.start
       @channels.each do |channel|
-        ingress.execute(channel: channel, invalidate: true) do
+        synchronized = ingress.execute(channel: channel, invalidate: true) do
           adapter_for(channel).resync!('machine_fallback')
+        end
+        unless synchronized.success?
+          return Transition.new(code: synchronized.code, message: synchronized.message, mode: mode)
         end
       end
       Transition.new(code: :ok, message: 'fresh human snapshot required', mode: mode)
@@ -143,7 +199,8 @@ module UnobotV2
       end
       Machine::Ingress.new(
         adapters: adapters, own_nick: @own_nick, host_nicks: @host_nicks,
-        queue_capacity: @queue_capacity, on_error: @on_error
+        queue_capacity: @queue_capacity, on_error: @on_error,
+        on_own_nick_change: ->(nick) { @own_nick = nick }
       )
     end
 

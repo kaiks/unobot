@@ -5,12 +5,20 @@ module UnobotV2
     class Error < ArgumentError; end
 
     MESSAGING = %w[human machine].freeze
+    RUNTIMES = %w[legacy v2].freeze
     TRUE_VALUES = %w[1 true yes on].freeze
 
     module_function
 
     def messaging(env = ENV)
       normalize_messaging(env.fetch('UNO_MESSAGING', 'human'))
+    end
+
+    def runtime(env = ENV)
+      value = env.fetch('UNO_RUNTIME', 'legacy').to_s.downcase
+      return value if RUNTIMES.include?(value)
+
+      raise Error, "invalid UNO_RUNTIME #{value.inspect}; expected legacy or v2"
     end
 
     def fallback_enabled?(env = ENV)

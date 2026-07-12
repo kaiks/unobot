@@ -16,7 +16,27 @@ module UnobotV2
       Control = Struct.new(:operation, :completion, keyword_init: true) do
         def initialize(**values)
           super
-          freeze
+          @mutex = Mutex.new
+          @canceled = false
+          @claimed = false
+        end
+
+        def claim!
+          @mutex.synchronize do
+            return false if @canceled
+
+            @claimed = true
+          end
+          true
+        end
+
+        def cancel!
+          @mutex.synchronize do
+            return false if @claimed
+
+            @canceled = true
+          end
+          true
         end
       end
       ControlResult = Struct.new(:code, :value, :message, keyword_init: true) do
@@ -24,9 +44,10 @@ module UnobotV2
         def error? = !success?
       end
 
-      attr_reader :consumer, :adapters, :errors
+      attr_reader :consumer, :adapters, :errors, :last_control_result
 
-      def initialize(adapters:, own_nick:, host_nicks:, queue_capacity: 1_024, on_error: nil)
+      def initialize(adapters:, own_nick:, host_nicks:, queue_capacity: 1_024, on_error: nil,
+                     control_timeout: 5.0, on_own_nick_change: nil)
         @adapters = adapters.to_h { |channel, adapter| [channel.to_s.downcase, adapter] }.freeze
         @own_nick = own_nick.to_s
         @host_nicks = Array(host_nicks).map { |nick| nick.to_s.downcase }.freeze
@@ -37,6 +58,9 @@ module UnobotV2
         @errors = Queue.new
         @on_error = on_error
         @started = false
+        @control_timeout = Float(control_timeout)
+        raise ArgumentError, 'control timeout must be positive' unless @control_timeout.positive?
+        @on_own_nick_change = on_own_nick_change
         configure_tokens
         @consumer = OrderedConsumer.new(capacity: queue_capacity, on_error: method(:consumer_error)) do |envelope|
           process(envelope)
@@ -48,22 +72,24 @@ module UnobotV2
 
         consumer.start
         @started = true
-        execute { adapters.values.map(&:start) }
+        @last_control_result = execute { adapters.values.map(&:start) }
         self
       end
 
       def stop(graceful: true)
         return self unless @started
 
-        execute(invalidate: true) do
+        @last_control_result = execute(invalidate: true) do
           if graceful
             adapters.each_value { |adapter| adapter.unregister! if adapter.can_unregister? }
           end
           adapters.each_value(&:stop!)
           @game_sessions.clear
         end
-        consumer.stop
-        @started = false
+        if @last_control_result.success?
+          consumer.stop
+          @started = false
+        end
         self
       end
 
@@ -93,8 +119,27 @@ module UnobotV2
 
         completion = Queue.new
         control = Control.new(operation: operation, completion: completion)
-        consumer.push(control, nonblock: false)
-        completion.pop
+        deadline = monotonic_now + @control_timeout
+        until consumer.push(control)
+          if monotonic_now >= deadline
+            control.cancel!
+            return ControlResult.new(code: :control_timeout, message: 'control queue admission timed out')
+          end
+          Thread.pass
+        end
+        remaining = deadline - monotonic_now
+        result = remaining.positive? ? completion.pop(timeout: remaining) : nil
+        return result if result
+
+        control.cancel!
+        ControlResult.new(code: :control_timeout, message: 'control completion timed out')
+      end
+
+      def worker_thread? = consumer.worker_thread?
+
+      def invalidate!
+        invalidate_epoch!
+        true
       end
 
       def tick
@@ -124,7 +169,9 @@ module UnobotV2
       def process(envelope)
         handle_overflow
         if envelope.is_a?(Control)
-          envelope.completion << control_call(envelope.operation)
+          if envelope.claim!
+            envelope.completion << control_call(envelope.operation)
+          end
           return
         end
         return unless current_epoch?(envelope.epoch)
@@ -195,6 +242,7 @@ module UnobotV2
           if event.old_nick.to_s.casecmp?(@own_nick)
             @own_nick = event.new_nick.to_s
             selected.each { |adapter| adapter.rename!(@own_nick) }
+            safe_callback(@on_own_nick_change, @own_nick)
             @game_sessions.clear
           else
             selected.each { |adapter| adapter.host_renamed!(event.old_nick, event.new_nick) }
@@ -204,8 +252,8 @@ module UnobotV2
           affected = event.affected_nick || (event.kind == :kick ? event.recipient : event.source)
           return unless affected.to_s.casecmp?(@own_nick)
 
-          selected.each { |adapter| adapter.resync!(event.kind.to_s) }
-          cleanup_routes
+          selected.each(&:disconnect!)
+          @game_sessions.delete_if { |_game_id, adapter| selected.include?(adapter) }
         else
           report(:unknown_lifecycle, event.kind.to_s)
         end
@@ -253,6 +301,16 @@ module UnobotV2
       rescue StandardError => error
         report(:control_error, error.message)
         ControlResult.new(code: :control_error, message: error.message)
+      end
+
+      def safe_callback(callback, *arguments)
+        callback&.call(*arguments)
+      rescue StandardError => error
+        report(:lifecycle_callback_failed, error.message)
+      end
+
+      def monotonic_now
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
 
       def current_epoch?(epoch)

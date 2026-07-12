@@ -7,6 +7,9 @@ engine protocol consumed by strategies.
 
 The existing Cinch plugin and `UnoAI` runtime remain the default. Requiring
 `lib/unobot_v2` and constructing `UnobotV2::Runtime` opts into the v2 path.
+`UNO_RUNTIME=legacy|v2` defaults to `legacy` and is the deployment selector;
+the application must inject a canonical strategy when constructing the v2
+bridge. This stage intentionally does not select a tournament strategy.
 `UNO_MESSAGING=human|machine` selects messaging and defaults to `human`;
 invalid values fail at startup. Strategy injection is a separate constructor
 argument and is never selected by this setting.
@@ -97,6 +100,34 @@ lifecycle callbacks) and call `enqueue`. Machine registration and ACTION
 output retain the IRC-facing `uno` name. The legacy starter remains unchanged
 until the selectable strategies required by the next stage exist.
 
+`UnobotV2::CinchBridge` is the concrete v2 attachment. Construct it with the
+connected `Cinch::Bot` and an injected strategy, then call `attach!` before the
+bot starts. It installs minimal synchronous dispatch-boundary handlers which
+only snapshot immutable callback data and nonblockingly enqueue it. A bridge
+worker maps those snapshots and controls the runtime, preserving IRC dispatch
+order without running protocol parsing, strategy code, or transport output on
+the Cinch callback thread. Runtime startup waits until the bot has joined every
+configured channel; periodic machine expiry ticks are driven automatically.
+
+The bridge sends channel registration and human commands with
+`Channel#send`. Correlated machine ACTION goes to the host alias that actually
+sent REGISTERED using private `User#send`; it never uses NOTICE for client
+actions. Private NOTICE recipient correlation uses the first IRC parameter,
+not Cinch's private-message `target`. Human mode requires exactly one channel
+because private status and hand notices do not encode a channel. Multi-channel
+machine mode is supported, but machine-to-human fallback is rejected there.
+
+Example application selection:
+
+```ruby
+if UnobotV2::Configuration.runtime(ENV) == 'v2'
+  bridge = UnobotV2::CinchBridge.new(bot: bot, strategy: injected_strategy)
+  bridge.attach!
+else
+  # Configure the existing UnobotPlugin.
+end
+```
+
 ## Machine transport and recovery
 
 Machine mode sends `.uno machine register` in every configured game channel.
@@ -121,6 +152,16 @@ are enqueued on the same ordered path and recover incomplete frames after the
 30-second deadline even when no further NOTICE arrives. The same tick treats
 a 30-second missing ACK as uncertain execution: it invalidates and
 re-registers but never replays the action.
+
+Start, registration, graceful unregister/stop, fallback, and explicit resync
+are ordered controls on the ingress worker. Operator controls invalidate the
+decision epoch before waiting, use bounded queue-admission and completion
+deadlines, and return structured `control_timeout` outcomes. A transition
+requested from the ingress worker returns `restart_required` rather than
+self-joining. Graceful stop best-effort unregisters while still connected.
+PART, QUIT, and KICK affect a session only when their affected nick is this
+client; departure invalidates without trying to register while absent, and a
+later own JOIN/reconnect performs fresh registration.
 
 Nonretryable stale/protocol/transport failures re-register for authoritative
 state. Terminal authorization/game errors (`no_game`, `not_allowlisted`,

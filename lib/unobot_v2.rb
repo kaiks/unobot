@@ -18,6 +18,7 @@ require_relative 'unobot_v2/controller'
 require_relative 'unobot_v2/configuration'
 require_relative 'unobot_v2/messaging_factory'
 require_relative 'unobot_v2/runtime'
+require_relative 'unobot_v2/cinch_bridge'
 
 module UnobotV2
   PROTOCOL_VERSION = 1

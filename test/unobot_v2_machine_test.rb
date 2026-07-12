@@ -583,6 +583,40 @@ class UnobotV2MachineIngressTest < Minitest::Test
     ingress.stop
   end
 
+  def test_blocked_worker_returns_bounded_control_timeout_and_invalidates_decision_epoch
+    started = Queue.new
+    release = Queue.new
+    result_queue = Queue.new
+    uno = nil
+    uno = adapter('#uno', on_request: lambda do |request|
+      started << true
+      release.pop
+      result_queue << uno.submit({ action: 'draw' }, decision_id: request.decision_id)
+    end)
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: ['Host'],
+      queue_capacity: 1, control_timeout: 0.02
+    ).start
+    @sent.pop
+    ingress.enqueue(notice(@fixture.fetch('registered_line')))
+    wait_until { uno.game_id }
+    lines = @fixture.fetch('state_lines')
+    lines.first(2).each_with_index do |line, index|
+      assert ingress.enqueue(notice(line))
+      wait_until { uno.frame_buffer.frames.values.first&.parts&.length == index + 1 }
+    end
+    assert ingress.enqueue(notice(lines.last))
+    started.pop
+    assert ingress.enqueue(notice(@fixture.fetch('ack_line')))
+    control = ingress.execute(invalidate: true) { flunk 'timed-out control must be canceled' }
+    assert_equal :control_timeout, control.code
+    release << true
+    assert_equal :invalidated_decision, result_queue.pop.code
+    wait_until { ingress.consumer.alive? }
+    ingress.synchronize
+    ingress.stop
+  end
+
   def test_disconnect_reconnect_and_nick_lifecycle_are_ordered
     uno = adapter('#uno')
     ingress = UnobotV2::Machine::Ingress.new(
@@ -622,6 +656,10 @@ class UnobotV2MachineIngressTest < Minitest::Test
     assert @sent.empty?, 'unrelated lifecycle must not emit registration traffic'
 
     ingress.enqueue(notice('', kind: :kick, source: 'Op', recipient: 'Alice', channel: '#uno'))
+    ingress.synchronize
+    assert_equal :disconnected, uno.lifecycle
+    assert @sent.empty?, 'departure must wait for a later join/reconnect before registration'
+    ingress.enqueue(notice('', kind: :reconnect, channel: '#uno'))
     ingress.synchronize
     assert_equal :registering, uno.lifecycle
     assert_equal '.uno machine register', @sent.pop[1]
@@ -932,6 +970,41 @@ class UnobotV2RuntimeSelectionTest < Minitest::Test
     result = human.transition_to('machine')
     assert_predicate result, :restart_required?
     assert_equal 'human', human.mode
+  end
+
+  def test_transition_requested_from_strategy_worker_returns_restart_required_without_deadlock
+    transition = Queue.new
+    runtime = nil
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: @strategy, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: method(:send_line), fallback_enabled: true,
+      on_submission: ->(_result, _request) { transition << runtime.transition_to('human') }
+    ).start
+    @sent.pop
+    runtime.enqueue(machine_notice(@fixture.fetch('registered_line')))
+    @fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    result = transition.pop
+    assert_predicate result, :restart_required?
+    assert_equal 'machine', runtime.mode
+    assert_predicate runtime.ingress.consumer, :alive?
+    runtime.stop
+  end
+
+  def test_stop_requested_from_strategy_worker_is_deferred_without_self_join
+    stop_result = Queue.new
+    runtime = nil
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'machine', strategy: @strategy, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: method(:send_line),
+      on_submission: ->(_result, _request) { stop_result << runtime.stop }
+    ).start
+    @sent.pop
+    runtime.enqueue(machine_notice(@fixture.fetch('registered_line')))
+    @fixture.fetch('state_lines').each { |line| runtime.enqueue(machine_notice(line)) }
+    result = stop_result.pop
+    assert_predicate result, :success?
+    assert_match(/deferred/, result.message)
+    wait_for { !runtime.ingress.consumer.alive? }
   end
 
   private
