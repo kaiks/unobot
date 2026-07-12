@@ -150,11 +150,23 @@ The generic process strategy accepts exactly the Jedna v1 `request_action`
 object on stdin and exactly one JSON object line on stdout. Stdout is
 protocol-only; stderr is drained concurrently into bounded private tail
 storage, while public diagnostics expose only byte counts and structured
-status. Startup, request, and shutdown are bounded. Malformed, duplicate,
-noisy, oversized, late, timed-out, or invalid actions fail closed. Cancellation
-advances a generation token, terminates the process group with TERM/KILL
-escalation, and reaps it. `per_game` is the stock policy; the process layer
-also supports a `persistent` lifecycle for a future long-lived strategy.
+status. Startup and shutdown are bounded. One request deadline covers both a
+nonblocking stdin write and the response read, so a child that stops reading
+cannot wedge cancellation or shutdown. Malformed, noisy, oversized,
+timed-out, late-after-cancellation, or invalid actions fail closed.
+Cancellation advances a generation token, terminates the process group with
+TERM/KILL escalation, and reaps it. `per_game` is the stock policy; the
+process layer also supports a `persistent` lifecycle for a future long-lived
+strategy.
+
+Jedna's response line has no request ID or end-of-response marker. A buffered
+or immediate second line therefore fails the current request, and unsolicited
+output already present before the next request fails and kills the process.
+An arbitrarily delayed second line cannot retroactively revoke a valid first
+line that was already accepted; detecting that would require delaying every
+action for the whole turn deadline. The maintained agents honor the one-line
+contract, and any delayed extra line is rejected before a later request uses
+that process.
 
 ## Machine transport and recovery
 

@@ -22,6 +22,16 @@ class UnobotV2ProcessAgentTest < Minitest::Test
     )
   end
 
+  def large_request
+    @large_request ||= UnobotV2::Canonical::DecisionRequest.new(
+      your_id: 'bot', hand: Array.new(100_000, 'r5'), top_card: 'b7',
+      game_state: 'normal', stacked_cards: 0, already_picked: false,
+      picked_card: nil, other_players: [{ id: 'other', card_count: 2 }],
+      available_actions: ['draw'], playable_cards: [],
+      metadata: { decision_id: 'large', game_id: 'g1', transport: 'machine' }
+    )
+  end
+
   def agent(mode, **options)
     @agents ||= []
     created = UnobotV2::ProcessAgent.new(
@@ -202,5 +212,59 @@ class UnobotV2ProcessAgentTest < Minitest::Test
       assert_equal :startup_failed, error.code
     end
     refute immediate.running?
+  end
+
+  def test_non_reading_child_has_one_deadline_for_bounded_request_write_and_response
+    payload_bytes = JSON.generate(large_request.protocol_h).bytesize
+    assert_operator payload_bytes, :>=, 500_000
+    assert_operator payload_bytes, :<, 510_000
+    strategy = agent('non_reading', request_timeout: 0.1)
+    pid = strategy.instance_variable_get(:@wait_thread).pid
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    error = assert_raises(UnobotV2::ProcessAgent::Error) { strategy.decide(large_request) }
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    assert_equal :request_timeout, error.code
+    assert_operator elapsed, :<, 1
+    refute strategy.running?
+    assert_raises(Errno::ESRCH) { Process.kill(0, pid) }
+  end
+
+  def test_cancel_end_game_and_shutdown_interrupt_a_saturated_request_pipe
+    %i[cancel end_game shutdown].each do |operation|
+      strategy = agent(
+        'non_reading', request_timeout: 10, shutdown_timeout: 0.1,
+        lifecycle: operation == :end_game ? :persistent : :per_game
+      )
+      outcome = Queue.new
+      decision = Thread.new do
+        strategy.decide(large_request)
+        outcome << :action
+      rescue StandardError => error
+        outcome << error.code
+      end
+      sleep 0.05 until strategy.diagnostics[:generation] >= 2
+      sleep 0.05 # allow the nonblocking writer to saturate the child pipe
+      pid = strategy.instance_variable_get(:@wait_thread).pid
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      case operation
+      when :cancel then strategy.cancel(reason: 'operator cancel')
+      when :end_game then strategy.end_game('g1', reason: 'host ended')
+      when :shutdown then strategy.shutdown
+      end
+      assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 1, operation
+      assert decision.join(1), "#{operation} left the request writer blocked"
+      refute_equal :action, outcome.pop, operation
+      refute strategy.running?, operation
+      assert_raises(Errno::ESRCH) { Process.kill(0, pid) }
+    end
+  end
+
+  def test_delayed_duplicate_is_bounded_by_the_uncorrelated_line_protocol
+    strategy = agent('delayed_duplicate')
+    assert_equal 'draw', strategy.decide(request).action
+    sleep 0.25
+    error = assert_raises(UnobotV2::ProcessAgent::Error) { strategy.decide(request) }
+    assert_equal :unexpected_output, error.code
+    refute strategy.running?
   end
 end

@@ -5,6 +5,7 @@ require 'json'
 
 mode = ARGV.fetch(0, 'valid')
 exit 17 if mode == 'immediate_exit'
+sleep 10 if mode == 'non_reading'
 
 while (line = $stdin.gets)
   request = JSON.parse(line)
@@ -20,6 +21,11 @@ while (line = $stdin.gets)
     puts '[]'
   when 'duplicate'
     puts JSON.generate('action' => 'draw')
+    puts JSON.generate('action' => 'draw')
+  when 'delayed_duplicate'
+    puts JSON.generate('action' => 'draw')
+    $stdout.flush
+    sleep 0.2
     puts JSON.generate('action' => 'draw')
   when 'noise'
     puts 'diagnostic noise'

@@ -92,9 +92,10 @@ module UnobotV2
           @generation += 1
         end
         start_process(expected_generation: token) unless running?
+        deadline = now + @request_timeout
         reject_pending_stdout!
-        write_request(request, token)
-        raw = read_response(token, deadline: now + @request_timeout)
+        write_request(request, token, deadline: deadline)
+        raw = read_response(token, deadline: deadline)
         parsed = parse_response(raw)
         ensure_current!(token)
         action = ActionValidator.validate(parsed, request: request)
@@ -122,8 +123,8 @@ module UnobotV2
       return false unless should_end
 
       if running?
-        notify(type: 'game_end', reason: reason.to_s)
-        stop_process(graceful: true) if lifecycle == :per_game
+        delivered = notify({ type: 'game_end', reason: reason.to_s }, deadline: now + @shutdown_timeout)
+        stop_process(graceful: true) if lifecycle == :per_game || !delivered
       end
       true
     end
@@ -273,16 +274,16 @@ module UnobotV2
       raise failure if failure
     end
 
-    def write_request(request, token)
+    def write_request(request, token, deadline:)
       @write_mutex.synchronize do
         ensure_current!(token)
-        line = JSON.generate(request.protocol_h)
+        line = JSON.generate(request.protocol_h) << "\n"
         stdin = @state_mutex.synchronize { @stdin }
         raise Error.new(:not_running, 'agent input is unavailable') unless stdin
 
-        stdin.write(line)
-        stdin.write("\n")
-        stdin.flush
+        write_nonblock(stdin, line, deadline: deadline, token: token,
+                       timeout_code: :request_timeout,
+                       timeout_message: 'agent request exceeded its deadline while writing')
       end
     rescue Errno::EPIPE, IOError => error
       ensure_current!(token)
@@ -367,18 +368,36 @@ module UnobotV2
       stop_process(graceful: false)
     end
 
-    def notify(message)
+    def notify(message, deadline:)
       @write_mutex.synchronize do
         stdin = @state_mutex.synchronize { @stdin }
         return false unless stdin && !stdin.closed?
 
-        stdin.write(JSON.generate(message))
-        stdin.write("\n")
-        stdin.flush
-        true
+        data = JSON.generate(message) << "\n"
+        write_nonblock(stdin, data, deadline: deadline, token: nil,
+                       timeout_code: :notification_timeout,
+                       timeout_message: 'agent lifecycle notification exceeded its deadline')
       end
-    rescue Errno::EPIPE, IOError
+    rescue Error, Errno::EPIPE, IOError
       false
+    end
+
+    def write_nonblock(io, data, deadline:, token:, timeout_code:, timeout_message:)
+      offset = 0
+      while offset < data.bytesize
+        ensure_current!(token) if token
+        remaining = deadline - now
+        raise Error.new(timeout_code, timeout_message) unless remaining.positive?
+
+        ready = IO.select(nil, [io], nil, [remaining, 0.05].min)
+        next unless ready
+
+        written = io.write_nonblock(data.byteslice(offset, data.bytesize - offset), exception: false)
+        next if written == :wait_writable
+
+        offset += written
+      end
+      true
     end
 
     def start_stderr_drain(stderr)
