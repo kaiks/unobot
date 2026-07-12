@@ -144,6 +144,39 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     end
   end
 
+  class ManagerBlockingAgent
+    attr_reader :name, :started
+
+    def initialize(action)
+      @name = 'manager-blocking'
+      @action = action
+      @gate = Queue.new
+      @started = Queue.new
+      @closed = false
+    end
+
+    def start_game(*) = self
+
+    def decide(_request)
+      started << true
+      @gate.pop
+      @action
+    end
+
+    def end_game(*)
+      @gate << true
+      true
+    end
+
+    def shutdown
+      return self if @closed
+
+      @closed = true
+      @gate << true
+      self
+    end
+  end
+
   def setup
     @request = UnobotV2::Canonical::DecisionRequest.new(
       your_id: 'Bot', hand: ['r5'], top_card: 'b7', game_state: 'normal',
@@ -321,6 +354,28 @@ class UnobotV2ShadowStrategyTest < Minitest::Test
     assert_equal '#b', result_b.channel
     assert_equal '#b', shadow.started.pop(timeout: 1)
     refute wrapper.diagnostics.fetch(:shadow_disabled)
+  end
+
+  def test_preemption_releases_real_shadow_manager_session_without_orphan
+    observations = Queue.new
+    agent = ManagerBlockingAgent.new(@play)
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'simple', factories: { 'simple' => -> { agent } }
+    )
+    wrapper = build(NoopPrimary.new(@draw), manager, observations, queue_capacity: 1)
+
+    assert_equal @draw, wrapper.decide(@request)
+    agent.started.pop(timeout: 1) || flunk('manager strategy did not start')
+    assert_equal ['machine:#uno:g1'], manager.active_game_keys
+    assert_equal :ended, wrapper.game_end_for(@request, reason: 'manager_preempt')
+    result = observations.pop(timeout: 1)
+    assert_equal :dropped, result.status
+    wait_until { manager.active_game_keys.empty? }
+    assert_empty manager.active_game_keys
+
+    wrapper.shutdown
+    refute wrapper.diagnostics.fetch(:decision_worker_alive)
+    refute wrapper.diagnostics.fetch(:control_worker_alive)
   end
 
   def test_configuration_accepts_only_canonical_shadow_strategies
