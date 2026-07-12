@@ -43,7 +43,11 @@ module UnobotV2
           delete(key)
           return result(:error, message: message, error: Protocol::Error.new(code: :mixed_chunks), expired: expired)
         end
-        frame ||= create_frame(message)
+        evicted = []
+        unless frame
+          frame, capacity_evicted = create_frame(message)
+          evicted << capacity_evicted if capacity_evicted
+        end
 
         existing = frame.parts[message.part]
         if existing && existing != message.data
@@ -56,7 +60,8 @@ module UnobotV2
         frame.bytes += message.data.bytesize
         frame.updated_at = now
         @total_bytes += message.data.bytesize
-        evicted = enforce_limits(except: key)
+        evicted.concat(enforce_limits(except: key))
+        evicted.freeze
         unless frames.key?(key)
           return result(:error, message: message, error: Protocol::Error.new(code: :frame_evicted),
                          expired: expired, evicted: evicted)
@@ -94,10 +99,12 @@ module UnobotV2
       private
 
       def create_frame(message)
-        evict_oldest while frames.length >= @max_frames
+        evicted = evict_oldest while frames.length >= @max_frames
         timestamp = now
-        frames[message.correlation] = Frame.new(message: message, parts: {}, bytes: 0,
-                                                created_at: timestamp, updated_at: timestamp)
+        frame = Frame.new(message: message, parts: {}, bytes: 0,
+                          created_at: timestamp, updated_at: timestamp)
+        frames[message.correlation] = frame
+        [frame, evicted]
       end
 
       def complete?(frame)
