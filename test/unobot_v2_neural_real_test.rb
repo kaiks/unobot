@@ -7,21 +7,21 @@ require_relative '../lib/unobot_v2'
 # Opt-in because the external checkpoint and Python Torch/SB3 stack are not
 # repository dependencies. Run with UNO_RUN_REAL_NEURAL_TESTS=1.
 class UnobotV2NeuralRealTest < Minitest::Test
-  EXAMPLES = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/examples'
-  CHECKPOINT = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/checkpoints/' \
-               'overnight-dagger/checkpoint_17500000_steps.zip'
+  DEFAULT_EXAMPLES = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/examples'
+  DEFAULT_CHECKPOINT = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/checkpoints/' \
+                       'overnight-dagger/checkpoint_17500000_steps.zip'
 
   def setup
     skip 'set UNO_RUN_REAL_NEURAL_TESTS=1 for the external model smoke test' unless ENV['UNO_RUN_REAL_NEURAL_TESTS'] == '1'
-    skip 'external Jedna examples are unavailable' unless File.file?(File.join(EXAMPLES, 'rl_agent/sb3_opponent.py'))
-    skip 'external 17.5M checkpoint is unavailable' unless File.file?(CHECKPOINT)
+    skip 'external Jedna examples are unavailable' unless File.file?(File.join(examples, 'rl_agent/sb3_opponent.py'))
+    skip 'external 17.5M checkpoint is unavailable' unless File.file?(checkpoint)
   end
 
   def test_real_checkpoint_cold_warm_and_game_reset_reuse
     agent = UnobotV2::StrategyFactory.build(
       'neural', env: {
-        'UNO_TOURNAMENT_EXAMPLES' => EXAMPLES,
-        'UNO_NEURAL_CHECKPOINT' => CHECKPOINT,
+        'UNO_TOURNAMENT_EXAMPLES' => examples,
+        'UNO_NEURAL_CHECKPOINT' => checkpoint,
         'UNO_NEURAL_COLD_TIMEOUT' => '20', 'UNO_NEURAL_WARM_TIMEOUT' => '2'
       }
     )
@@ -38,6 +38,7 @@ class UnobotV2NeuralRealTest < Minitest::Test
     warm = monotonic - warm_started
     UnobotV2::ActionValidator.validate(first, request: request)
     UnobotV2::ActionValidator.validate(second, request: request)
+    assert_equal first, second
     assert_operator cold, :<, 20
     assert_operator warm, :<, 2
     assert_equal :ready, agent.diagnostics[:health]
@@ -51,6 +52,9 @@ class UnobotV2NeuralRealTest < Minitest::Test
   end
 
   private
+
+  def examples = ENV.fetch('UNO_TOURNAMENT_EXAMPLES', DEFAULT_EXAMPLES)
+  def checkpoint = ENV.fetch('UNO_NEURAL_CHECKPOINT', DEFAULT_CHECKPOINT)
 
   def two_player_request
     envelope = JSON.parse(File.read(File.expand_path(

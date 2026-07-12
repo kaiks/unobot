@@ -13,6 +13,9 @@ class UnobotV2NeuralContractTest < Minitest::Test
     @examples = UnobotV2::StrategyFactory.discover_examples(File.expand_path('..', __dir__))
     skip 'sibling Jedna tournament examples are unavailable' unless @examples
     @python = ENV.fetch('UNO_NEURAL_PYTHON', 'python3')
+    skip "configured Python #{@python.inspect} is unavailable" unless system(
+      @python, '--version', out: File::NULL, err: File::NULL
+    )
   end
 
   def test_python_action_masks_match_canonical_validation_and_human_encoding

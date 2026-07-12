@@ -218,6 +218,21 @@ The external model smoke is opt-in:
 UNO_RUN_REAL_NEURAL_TESTS=1 ruby -Itest test/unobot_v2_neural_real_test.rb
 ```
 
+For the complete external two-player game smoke, use Jedna's maintained
+runner (its agent-command interface is a test harness, not unobot's production
+spawn path):
+
+```bash
+cd /path/to/jedna/extension-gems/jedna-tournaments/examples
+mise exec ruby@3.4.4 -- bundle exec ruby ./run_single_game.rb \
+  "python3 -m rl_agent.sb3_opponent --model ../checkpoints/overnight-dagger/checkpoint_17500000_steps.zip" \
+  "./simple_agent.rb"
+```
+
+Success means the runner prints `Game Over!` and a final winner before its
+30-second game deadline. This remains opt-in because Torch/SB3, the external
+checkpoint, and the Jedna bundle are intentionally not unobot dependencies.
+
 Jedna's response line has no request ID or end-of-response marker. A buffered
 or immediate second line therefore fails the current request, and unsolicited
 output already present before the next request fails and kills the process.
