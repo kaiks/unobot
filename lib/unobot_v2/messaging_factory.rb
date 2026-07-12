@@ -10,6 +10,7 @@ module UnobotV2
     HUMAN_KEYS = (COMMON_KEYS + %i[reducer encoder]).freeze
     MACHINE_KEYS = (COMMON_KEYS + %i[
       on_status frame_buffer clock ack_timeout registration_timeout
+      rename_recovery_timeout rename_retry_interval
     ]).freeze
 
     module_function

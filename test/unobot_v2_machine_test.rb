@@ -395,6 +395,70 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal 2, @sent.count { |_target, line, _thread| line == '.uno machine register' }
   end
 
+  def test_ordinary_not_player_registration_error_remains_terminal
+    time = 0.0
+    adapter = build_adapter(clock: -> { time }, rename_retry_interval: 1)
+    adapter.start
+    error = 'UNO_MACHINE_V1 ERROR game=- decision=- code=not_player retry=0'
+    result = adapter.receive(UnobotV2::Machine::Protocol.parse(error).value)
+    assert_equal :not_player, result.code
+    assert_equal :unregistered, adapter.lifecycle
+    refute_predicate adapter, :rename_recovering?
+    before = @sent.length
+    time = 5
+    assert_predicate adapter.tick, :success?
+    assert_equal before, @sent.length
+  end
+
+  def test_immediate_post_rename_not_player_schedules_bounded_retry_then_registered_succeeds
+    time = 0.0
+    adapter = build_adapter(
+      clock: -> { time }, rename_retry_interval: 1, rename_recovery_timeout: 5
+    )
+    register(adapter)
+    adapter.rename!('Alice2')
+    error = 'UNO_MACHINE_V1 ERROR game=- decision=- code=not_player retry=0'
+    result = adapter.receive(UnobotV2::Machine::Protocol.parse(error).value)
+    assert_equal :not_player, result.code
+    assert_predicate result.retryable, :itself
+    assert_equal :rename_recovery, adapter.lifecycle
+    assert_predicate adapter, :rename_recovering?
+
+    before = @sent.length
+    time = 0.9
+    assert_predicate adapter.tick, :success?
+    assert_equal before, @sent.length
+    time = 1.1
+    retry_result = adapter.tick
+    assert_equal :rename_retry, retry_result.code
+    assert_equal :registering, adapter.lifecycle
+    assert_equal before + 1, @sent.length
+    registered = adapter.receive(
+      UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value, source: 'Host'
+    )
+    assert_predicate registered, :success?
+    assert_equal :registered, adapter.lifecycle
+    refute_predicate adapter, :rename_recovering?
+  end
+
+  def test_rename_recovery_stops_at_its_deadline
+    time = 0.0
+    adapter = build_adapter(
+      clock: -> { time }, rename_retry_interval: 1, rename_recovery_timeout: 2
+    )
+    register(adapter)
+    adapter.rename!('Alice2')
+    error = 'UNO_MACHINE_V1 ERROR game=- decision=- code=not_player retry=0'
+    adapter.receive(UnobotV2::Machine::Protocol.parse(error).value)
+    before = @sent.length
+    time = 2.1
+    result = adapter.tick
+    assert_equal :rename_recovery_timeout, result.code
+    assert_equal :unregistered, adapter.lifecycle
+    refute_predicate adapter, :rename_recovering?
+    assert_equal before, @sent.length
+  end
+
   def test_wrong_game_stale_ack_and_unsafe_actions_are_structured_refusals
     register
     request = deliver_state.request

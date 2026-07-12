@@ -25,6 +25,8 @@ module UnobotV2
       HISTORY_LIMIT = 64
       DEFAULT_ACK_TIMEOUT = 30.0
       DEFAULT_REGISTRATION_TIMEOUT = 30.0
+      DEFAULT_RENAME_RECOVERY_TIMEOUT = 30.0
+      DEFAULT_RENAME_RETRY_INTERVAL = 1.0
 
       attr_reader :channel, :own_nick, :host_nick, :game_id, :lifecycle,
                   :active_request, :last_error, :frame_buffer, :callback_errors
@@ -34,7 +36,9 @@ module UnobotV2
                      on_status: nil, frame_buffer: FrameBuffer.new,
                      clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) },
                      ack_timeout: DEFAULT_ACK_TIMEOUT,
-                     registration_timeout: DEFAULT_REGISTRATION_TIMEOUT)
+                     registration_timeout: DEFAULT_REGISTRATION_TIMEOUT,
+                     rename_recovery_timeout: DEFAULT_RENAME_RECOVERY_TIMEOUT,
+                     rename_retry_interval: DEFAULT_RENAME_RETRY_INTERVAL)
         @channel = channel.to_s.downcase.freeze
         @own_nick = own_nick.to_s.dup.freeze
         @host_nicks = Array(host_nicks).map { |nick| nick.to_s.downcase }.freeze
@@ -50,6 +54,11 @@ module UnobotV2
         raise ArgumentError, 'ack timeout must be positive' unless @ack_timeout.positive?
         @registration_timeout = Float(registration_timeout)
         raise ArgumentError, 'registration timeout must be positive' unless @registration_timeout.positive?
+        @rename_recovery_timeout = Float(rename_recovery_timeout)
+        @rename_retry_interval = Float(rename_retry_interval)
+        if !@rename_recovery_timeout.positive? || !@rename_retry_interval.positive?
+          raise ArgumentError, 'rename recovery limits must be positive'
+        end
         @lifecycle = :unregistered
         @seen_decisions = []
         @submitted_decision_id = nil
@@ -77,6 +86,7 @@ module UnobotV2
       end
 
       def registering? = lifecycle == :registering
+      def rename_recovering? = !@rename_recovery_deadline.nil?
       def registered? = !game_id.nil? && %i[registered active awaiting_ack].include?(lifecycle)
       def connected? = @connected
       def can_unregister? = connected? && !%i[unregistered stopped disconnected].include?(lifecycle)
@@ -133,6 +143,19 @@ module UnobotV2
         unless expired.empty?
           return fail_closed!(:missing_chunks, 'machine frame expired before completion', reregister: true)
         end
+        if rename_recovering? && now >= @rename_recovery_deadline
+          @rename_recovery_deadline = nil
+          @rename_retry_at = nil
+          @lifecycle = :unregistered
+          return failure(:rename_recovery_timeout, 'host player rename did not become visible')
+        end
+        if lifecycle == :rename_recovery && @rename_retry_at && now >= @rename_retry_at
+          retried = register!
+          return retried if retried.error?
+
+          return failure(:rename_retry, 'retrying registration after host rename', line: retried.line,
+                          retryable: true)
+        end
         if lifecycle == :awaiting_ack && @action_sent_at && now - @action_sent_at >= @ack_timeout
           return fail_closed!(:ack_timeout, 'action acknowledgement was lost', reregister: true)
         end
@@ -165,6 +188,8 @@ module UnobotV2
       def rename!(new_nick)
         @own_nick = new_nick.to_s.dup.freeze
         invalidate_session!(:nick_changed)
+        @rename_recovery_deadline = now + @rename_recovery_timeout
+        @rename_retry_at = now + @rename_retry_interval
         register!
       end
 
@@ -212,6 +237,8 @@ module UnobotV2
         @host_nick = source.to_s.dup.freeze
         @game_id = message.game_id
         @registration_started_at = nil
+        @rename_recovery_deadline = nil
+        @rename_retry_at = nil
         @lifecycle = :registered
         @last_error = nil
         status(:registered)
@@ -319,8 +346,18 @@ module UnobotV2
         return failure(:unexpected_error) unless registering?
 
         @last_error = message.code.freeze
+        if message.code == 'not_player' && rename_recovering?
+          @lifecycle = :rename_recovery
+          @registration_started_at = nil
+          @rename_retry_at = now + @rename_retry_interval
+          status(:rename_retry_scheduled, event: message.code)
+          return failure(:not_player, message.code, retryable: true)
+        end
+
         @lifecycle = :unregistered
         @registration_started_at = nil
+        @rename_recovery_deadline = nil
+        @rename_retry_at = nil
         status(:registration_error, event: message.code)
         failure(message.code.to_sym, message.code, retryable: message.retryable)
       end
@@ -372,6 +409,8 @@ module UnobotV2
         @frame_buffer.clear
         @game_id = nil
         @registration_started_at = nil
+        @rename_recovery_deadline = nil
+        @rename_retry_at = nil
         @lifecycle = next_lifecycle
       end
 
