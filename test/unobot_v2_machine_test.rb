@@ -338,6 +338,33 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal '.uno machine register', @sent.last[1]
   end
 
+  def test_delayed_transient_terminal_after_new_registration_registers_fresh_again
+    register
+    assert_predicate @adapter.register!, :success?
+    @adapter.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value,
+                     source: 'Host')
+    before = @sent.count { |_target, line, _thread| line == '.uno machine register' }
+    result = deliver_event('nick_changed')
+    assert_predicate result, :success?
+    assert_equal :nick_changed, result.event
+    assert_equal :registering, @adapter.lifecycle
+    assert_nil @adapter.game_id
+    assert_equal before + 1, @sent.count { |_target, line, _thread| line == '.uno machine register' }
+  end
+
+  def test_transient_terminal_does_not_register_while_locally_disconnected
+    register
+    messages = event_messages('disconnected')
+    @adapter.disconnect!
+    before = @sent.length
+    result = messages.map { |message| @adapter.receive(message) }.last
+    assert_equal :unknown_game, result.code
+    assert_equal :disconnected, @adapter.lifecycle
+    assert_equal before, @sent.length
+    assert_predicate @adapter.reconnect!, :success?
+    assert_equal '.uno machine register', @sent.last[1]
+  end
+
   def test_lost_ack_times_out_into_registration_sync_without_replaying_action
     time = 0.0
     adapter = build_adapter(clock: -> { time }, ack_timeout: 1)
@@ -441,6 +468,25 @@ class UnobotV2MachineAdapterTest < Minitest::Test
              "decision=#{payload.fetch(:decision_id)} part=#{index + 1}/#{chunks.length} data=#{chunk}"
       @adapter.receive(UnobotV2::Machine::Protocol.parse(line).value)
     end.last
+  end
+
+
+  def deliver_event(event)
+    event_messages(event).map { |message| @adapter.receive(message) }.last
+  end
+
+  def event_messages(event)
+    payload = {
+      protocol: 'UNO_MACHINE_V1', protocol_version: 1, type: 'event',
+      event: event, game_id: @adapter.game_id, decision_id: nil, payload: {}
+    }
+    encoded = Base64.urlsafe_encode64(Zlib::Deflate.deflate(JSON.generate(payload)), padding: false)
+    chunks = encoded.scan(/.{1,128}/)
+    chunks.each_with_index.map do |chunk, index|
+      line = "UNO_MACHINE_V1 EVENT game=#{@adapter.game_id} decision=- event=#{event} " \
+             "part=#{index + 1}/#{chunks.length} data=#{chunk}"
+      UnobotV2::Machine::Protocol.parse(line).value
+    end
   end
 end
 

@@ -17,6 +17,7 @@ module UnobotV2
         game_ended stopped unregistered nick_changed parted quit kicked
         disconnected plugin_unloaded
       ].freeze
+      TRANSIENT_TERMINAL_EVENTS = %w[nick_changed parted quit kicked disconnected].freeze
       TERMINAL_ERROR_CODES = %w[
         no_game not_allowlisted not_player game_changed registration_taken
         not_registered unknown_game game_ended unauthorized
@@ -329,9 +330,15 @@ module UnobotV2
         return failure(:unknown_event) unless TERMINAL_EVENTS.include?(event)
 
         invalidate_session!(event.to_sym)
-        @connected = false if event == 'disconnected'
         @lifecycle = :stopped if event == 'plugin_unloaded'
         status(:terminal_event, event: event)
+        if TRANSIENT_TERMINAL_EVENTS.include?(event) && @connected
+          registration = register!
+          return registration if registration.error?
+
+          return success(event: event.to_sym, line: registration.line)
+        end
+
         success(event: event.to_sym)
       end
 
