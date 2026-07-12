@@ -36,10 +36,6 @@ module UnobotV2
       figure == 'wd4' || figure == 'r'
     end
 
-    def double_playable?(card, hand:, already_picked:)
-      !already_picked && hand.count(Canonical::Cards.base(card)) >= 2
-    end
-
     private
 
     def actions_after_draw(playable)
