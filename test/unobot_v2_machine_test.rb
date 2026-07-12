@@ -1007,6 +1007,35 @@ class UnobotV2RuntimeSelectionTest < Minitest::Test
     wait_for { !runtime.ingress.consumer.alive? }
   end
 
+  def test_human_stop_invalidates_blocked_strategy_before_waiting_for_worker
+    started = Queue.new
+    release = Queue.new
+    blocking = Class.new(UnobotV2::Strategy) do
+      define_method(:initialize) { |started_queue, release_queue| @started = started_queue; @release = release_queue }
+      define_method(:decide) do |_request|
+        @started << true
+        @release.pop
+        UnobotV2::Canonical::Action.new(action: 'draw')
+      end
+    end.new(started, release)
+    runtime = UnobotV2::Runtime.new(
+      messaging: 'human', strategy: blocking, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: method(:send_line)
+    ).start
+    enqueue_human_snapshot(runtime)
+    started.pop
+
+    stopped = Queue.new
+    operator = Thread.new { stopped << runtime.stop }
+    wait_for { operator.status == 'sleep' }
+    release << true
+    assert_predicate stopped.pop, :success?
+    operator.join
+    sent = []
+    sent << @sent.pop until @sent.empty?
+    refute sent.any? { |_target, line, _thread| line == 'pe' }, 'stale human action must not escape after stop'
+  end
+
   private
 
   def runtime(mode, fallback_enabled: false)

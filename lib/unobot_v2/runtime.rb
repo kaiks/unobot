@@ -65,6 +65,7 @@ module UnobotV2
     end
 
     def stop
+      @channels.each { |channel| ingress.invalidate(channel) } if mode == 'human'
       if ingress.respond_to?(:worker_thread?) && ingress.worker_thread?
         Thread.new { ingress.stop }
         return Transition.new(code: :ok, message: 'stop deferred from ingress worker', mode: mode)

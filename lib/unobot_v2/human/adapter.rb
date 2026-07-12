@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'thread'
+
 require_relative '../interfaces'
 require_relative 'reducer'
 require_relative 'action_encoder'
@@ -7,7 +9,7 @@ require_relative 'action_encoder'
 module UnobotV2
   module Human
     class Adapter < MessagingAdapter
-      attr_reader :reducer
+      attr_reader :reducer, :callback_errors, :last_error
       attr_writer :lifecycle_token, :token_validator
 
       def initialize(channel:, own_nick:, host_nicks:, transport:, on_request: nil,
@@ -19,6 +21,8 @@ module UnobotV2
         @last_decision_id = nil
         @active_request = nil
         @submitted_decision_id = nil
+        @callback_errors = Queue.new
+        @last_error = nil
       end
 
       def receive(event)
@@ -33,7 +37,14 @@ module UnobotV2
         @active_request = request
         @active_lifecycle_token = @lifecycle_token
         @last_decision_id = request.decision_id
-        @on_request&.call(request)
+        begin
+          @on_request&.call(request)
+        rescue StandardError => error
+          @callback_errors << error
+          @last_error = :strategy_error
+          resync!('strategy_error')
+          return Reduction.new(changed: true, reason: "strategy_error: #{error.message}")
+        end
         reduction
       end
 

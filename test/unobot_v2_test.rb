@@ -406,6 +406,26 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     end
   end
 
+  def test_strategy_exception_fails_closed_and_requests_fresh_human_snapshot
+    sent = []
+    adapter = UnobotV2::Human::Adapter.new(
+      channel: CHANNEL, own_nick: 'Alice', host_nicks: [HOST],
+      transport: ->(channel, command) { sent << [channel, command] },
+      on_request: ->(_request) { raise 'human strategy boom' }
+    )
+    adapter.receive(event(status, private: true, recipient: 'Alice'))
+    adapter.receive(event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true, recipient: 'Alice'))
+    reduction = adapter.receive(event("#{RED_5} #{GREEN_3} #{WD4}", private: true, recipient: 'Alice'))
+
+    assert_equal 'strategy_error: human strategy boom', reduction.reason
+    assert_equal :strategy_error, adapter.last_error
+    assert_equal 'human strategy boom', adapter.callback_errors.pop.message
+    refute adapter.reducer.safe?
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], sent.last(2)
+    result = adapter.submit({ action: 'draw' }, decision_id: 'stale')
+    assert_equal :stale_decision, result.code
+  end
+
   def test_inconsistent_out_of_order_turn_refuses_and_resynchronizes
     synchronize(current: 'Bob', players: 'Bob:2,Alice:3,Carol:2')
     reduction = @adapter.receive(event("Carol's turn. Top card: #{RED_5}"))
