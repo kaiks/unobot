@@ -4,6 +4,7 @@ require_relative 'test_helper'
 require 'json'
 require 'open3'
 require 'rbconfig'
+require 'tmpdir'
 
 class UnobotApplicationTest < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
@@ -46,6 +47,21 @@ class UnobotApplicationTest < Minitest::Test
     assert_match(/crushing_agent\.rb/, result[:stderr])
   end
 
+  def test_v2_accepts_neural_strategy_configuration_without_spawning_the_model
+    Dir.mktmpdir('unobot-checkpoint') do |directory|
+      checkpoint = File.join(directory, 'checkpoint_17500000_steps.zip')
+      File.write(checkpoint, 'fixture')
+      result = probe(
+        'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'machine', 'UNO_STRATEGY' => 'neural',
+        'UNO_TOURNAMENT_EXAMPLES' => File.join(ROOT, 'test/fixtures/neural_examples'),
+        'UNO_NEURAL_CHECKPOINT' => checkpoint
+      )
+      assert result[:status].success?, result[:stderr]
+      assert_equal 'neural', result[:json].fetch('strategy')
+      assert_equal true, result[:json].fetch('bridge')
+    end
+  end
+
   def test_legacy_rejects_strategy_or_messaging_settings_it_cannot_honor
     strategy = probe('UNO_RUNTIME' => 'legacy', 'UNO_STRATEGY' => 'simple')
     refute strategy[:status].success?
@@ -66,7 +82,8 @@ class UnobotApplicationTest < Minitest::Test
     clean = {
       'UNO_RUNTIME' => nil, 'UNO_MESSAGING' => nil, 'UNO_STRATEGY' => nil,
       'UNO_TOURNAMENT_EXAMPLES' => nil, 'UNO_SIMPLE_ARGV' => nil,
-      'UNO_CRUSHING_ARGV' => nil
+      'UNO_CRUSHING_ARGV' => nil, 'UNO_NEURAL_CHECKPOINT' => nil,
+      'UNO_NEURAL_PYTHON' => nil, 'UNO_NEURAL_STOCHASTIC' => nil
     }
     stdout, stderr, status = Open3.capture3(
       clean.merge(environment), RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', PROBE,

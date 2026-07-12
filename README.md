@@ -52,6 +52,11 @@ UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=simple \
 # Maintained Jedna Crushing strategy over the machine protocol
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing \
   bundle exec ruby uno_bot_starter.rb
+
+# Persistent deterministic 17.5M neural policy (one two-player game globally)
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=neural \
+  UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip \
+  bundle exec ruby uno_bot_starter.rb
 ```
 
 The v2 strategies discover a sibling `../jedna` checkout. In another layout,
@@ -59,6 +64,12 @@ set `UNO_TOURNAMENT_EXAMPLES` to its tournament `examples` directory, or set
 `UNO_SIMPLE_ARGV` / `UNO_CRUSHING_ARGV` to a JSON argv array such as
 `["/usr/bin/ruby","/opt/jedna/examples/simple_agent.rb"]`. Operator commands
 are trusted configuration but are executed directly, never through a shell.
+
+The neural strategy executes `python3 -m rl_agent.sb3_opponent` from the
+validated tournament examples directory and passes the checkpoint as an argv
+value. It is deterministic by default; `UNO_NEURAL_STOCHASTIC=true` is an
+explicit opt-in. See the v2 documentation for health deadlines, process reuse,
+and the initial two-player/single-process limit.
 
 ### Docker Deployment
 

@@ -11,7 +11,7 @@ The existing Cinch plugin and `UnoAI` runtime remain the default.
 v2 mode; the callback sets cannot be installed together.
 
 V2 has two independent selectors. `UNO_MESSAGING=human|machine` defaults to
-`human`, while `UNO_STRATEGY=legacy|simple|crushing` chooses a canonical
+`human`, while `UNO_STRATEGY=legacy|simple|crushing|neural` chooses a canonical
 strategy. `simple` and `crushing` execute the maintained Jedna tournament
 programs rather than copies in this repository. `v2 + legacy` is rejected:
 the historical `UnoAI` depends on mutable tracker history, previous/last-card
@@ -135,6 +135,7 @@ UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=simple bundle exec ruby uno_bot_
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=simple bundle exec ruby uno_bot_starter.rb
 UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=crushing bundle exec ruby uno_bot_starter.rb
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing bundle exec ruby uno_bot_starter.rb
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=neural UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip bundle exec ruby uno_bot_starter.rb
 ```
 
 By default, agents are discovered in a sibling `jedna` checkout under
@@ -156,8 +157,66 @@ cannot wedge cancellation or shutdown. Malformed, noisy, oversized,
 timed-out, late-after-cancellation, or invalid actions fail closed.
 Cancellation advances a generation token, terminates the process group with
 TERM/KILL escalation, and reaps it. `per_game` is the stock policy; the
-process layer also supports a `persistent` lifecycle for a future long-lived
+process layer also supports the `persistent` lifecycle used by the neural
 strategy.
+
+## Neural strategy
+
+`UNO_STRATEGY=neural` runs the maintained persistent module
+`python3 -m rl_agent.sb3_opponent --model CHECKPOINT` with no shell
+interpolation. `UNO_TOURNAMENT_EXAMPLES` is a validated working directory and
+must contain `rl_agent/sb3_opponent.py`; `UNO_NEURAL_CHECKPOINT` must be a
+readable external file. In the sibling Jedna layout it defaults to
+`checkpoints/overnight-dagger/checkpoint_17500000_steps.zip`. Override the
+executable with the single argv value `UNO_NEURAL_PYTHON` when needed. The
+model is never copied into or loaded from this repository.
+
+Prediction is deterministic unless `UNO_NEURAL_STOCHASTIC=true` is explicitly
+set. `UNO_NEURAL_COLD_TIMEOUT` defaults to 15 seconds and covers the first
+request after process spawn, including model load; `UNO_NEURAL_WARM_TIMEOUT`
+defaults to 1 second. Spawning itself is bounded by
+`UNO_NEURAL_SPAWN_TIMEOUT` (5 seconds). The upstream module emits no ready
+marker, so configuration validates executable/module/checkpoint paths before
+IRC startup, while the first valid action is the truthful load/readiness health
+check. Diagnostics report `unverified`, `loading`, `ready`, or `failed`
+without exposing argv, paths, or stderr contents.
+
+The healthy process stays warm across `game_end`/new-game resets. Timeouts,
+crashes, invalid output, and failed model loads terminate and reap its process
+group, then impose exponential restart backoff. Configure the 1-second initial
+and 30-second maximum bounds with `UNO_NEURAL_BACKOFF_INITIAL` and
+`UNO_NEURAL_BACKOFF_MAX`. Cancellation and shutdown invalidate the current
+generation immediately; shutdown escalates TERM/KILL and reaps the group.
+
+The initial live release supports exactly this bot and one opponent. Because
+the canonical contract does not classify an opponent as human or automated,
+unobot enforces one `other_players` entry and the operator/host must ensure that
+opponent is human. The manager additionally permits only one active neural
+game across all channels, so it never allocates a second roughly 377 MiB model
+process. Unsupported topology is rejected before process spawn/session
+publication and cannot consume that global slot.
+
+Human messaging filters the canonical request through `ActionEncoder` before
+strategy inference. Any card/action variant the IRC grammar cannot express is
+removed conservatively; an empty mask refuses inference and requests a fresh
+`us`/`ca` snapshot. Machine messaging bypasses this transport-specific mask
+and retains the full canonical action space. The current human grammar covers
+draw, pass, wild colors, ordinary doubles, and double WD4 (`pl wd4rwd4r`).
+
+The dependency-free action-space contract can be checked with:
+
+```bash
+cd /path/to/jedna/extension-gems/jedna-tournaments/examples
+python3 -m unittest rl_agent.test_encoding
+cd /path/to/unobot
+ruby -Itest test/unobot_v2_neural_contract_test.rb
+```
+
+The external model smoke is opt-in:
+
+```bash
+UNO_RUN_REAL_NEURAL_TESTS=1 ruby -Itest test/unobot_v2_neural_real_test.rb
+```
 
 Jedna's response line has no request ID or end-of-response marker. A buffered
 or immediate second line therefore fails the current request, and unsolicited
