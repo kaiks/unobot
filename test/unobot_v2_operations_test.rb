@@ -110,13 +110,15 @@ class UnobotV2OperationsTest < Minitest::Test
 
   class FakeBridge
     attr_reader :runtime
-    attr_accessor :started, :joined, :worker_alive, :mode
+    attr_accessor :started, :joined, :worker_alive, :mode, :timer_alive, :ingress_alive
 
     def initialize(runtime: FakeRuntime.new)
       @runtime = runtime
       @started = true
       @joined = ['#uno']
       @worker_alive = true
+      @timer_alive = true
+      @ingress_alive = true
       @mode = 'machine'
     end
 
@@ -125,11 +127,11 @@ class UnobotV2OperationsTest < Minitest::Test
         mode: mode, attached: true, started: started, stopped: false,
         connected_once: true, joined_channels: joined,
         configured_channels: ['#uno'], accepting: true,
-        worker_alive: worker_alive, timer_alive: true,
+        worker_alive: worker_alive, timer_alive: timer_alive,
         queue_depth: 2, queue_capacity: 128, error_count: 3,
         runtime: {
           callback_error_count: 1,
-          ingress: { alive: true, queue_depth: 1, queue_capacity: 128, error_count: 2 },
+          ingress: { alive: ingress_alive, queue_depth: 1, queue_capacity: 128, error_count: 2 },
           channels: { '#uno' => { lifecycle: :active, game_id: 'g1', decision_id: 'd1' } }
         }
       }
@@ -231,6 +233,13 @@ class UnobotV2OperationsTest < Minitest::Test
 
     @bridge.worker_alive = true
     @bridge.started = false
+    refute operations.dispatch('command' => 'ready')[:ok]
+
+    @bridge.started = true
+    @bridge.timer_alive = false
+    refute operations.dispatch('command' => 'ready')[:ok]
+    @bridge.timer_alive = true
+    @bridge.ingress_alive = false
     refute operations.dispatch('command' => 'ready')[:ok]
   end
 

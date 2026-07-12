@@ -252,6 +252,8 @@ module UnobotV2
       channels = payload.dig(:bridge, :configured_channels) || []
       joined = payload.dig(:bridge, :joined_channels) || []
       available = healthy_payload?(payload) && payload.dig(:bridge, :started) &&
+                  payload.dig(:bridge, :timer_alive) &&
+                  payload.dig(:bridge, :runtime, :ingress, :alive) &&
                   (channels - joined).empty?
       available ? success(payload) : failure(:not_ready, 'IRC session is not ready', payload)
     end
