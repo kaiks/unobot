@@ -57,6 +57,7 @@ module UnobotV2
             return ActionEncoder::Result.new(code: :invalidated_decision, message: 'session was invalidated')
           end
           @transport.call(reducer.channel, result.command)
+          reducer.action_submitted!
           @submitted_decision_id = decision_id
         end
         result

@@ -274,6 +274,15 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal 1, request.other_players.find { |player| player.id == 'Bob' }.card_count
   end
 
+  def test_submitted_same_top_skip_is_not_mistaken_for_a_status_duplicate
+    request = synchronize(hand: "\x0312[S] #{RED_5}", top: 'bs', players: 'Alice:2,Bob:2')
+    result = @adapter.submit({ action: 'play', card: 'bs' }, decision_id: request.decision_id)
+    assert_predicate result, :success?
+    next_request = @adapter.receive(event("Alice's turn. Top card: \x0312[S]")).request
+    assert_equal ['r5'], next_request.hand
+    assert_equal 1, next_request.state_h[:hand].length
+  end
+
   def test_draw_correlation_rejects_duplicates_missing_public_and_out_of_turn
     synchronize(hand: "#{RED_5} #{GREEN_3}", players: 'Alice:2,Bob:2')
     @adapter.receive(event('Alice draws a card.'))
@@ -319,6 +328,20 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     reduction = @adapter.receive(event("You draw 4 cards: \x0312[1] \x0312[2] \x033[4] \x037[6]",
                                        private: true, recipient: 'Alice'))
     assert_equal 'duplicate private draw', reduction.reason
+  end
+
+  def test_unobserved_normal_pass_and_illegal_post_draw_play_force_resync
+    synchronize(current: 'Bob', players: 'Bob:2,Alice:3')
+    reduction = @adapter.receive(event("Bob passes. Alice's turn. Top card: #{RED_7}"))
+    assert_equal 'unexpected pass', reduction.reason
+
+    setup
+    synchronize(hand: "#{RED_5} #{GREEN_3}", players: 'Alice:2,Bob:2')
+    @adapter.receive(event('Alice draws a card.'))
+    @adapter.receive(event("You draw 1 card: #{WILD}", private: true, recipient: 'Alice'))
+    reduction = @adapter.receive(event("Bob's turn. Top card: #{RED_5}"))
+    assert_equal 'illegal post draw play', reduction.reason
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], @sent.last(2)
   end
 
   def test_impossible_observed_plays_and_malformed_status_players_force_resync

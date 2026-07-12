@@ -101,6 +101,10 @@ module UnobotV2
         uncertain!(reason)
       end
 
+      def action_submitted!
+        @status_anchor = nil
+      end
+
       def resync_commands
         %w[us ca]
       end
@@ -230,6 +234,9 @@ module UnobotV2
         if parsed.nil? || parsed.empty? || (phase == 'active' && (current == '-' || top == '-'))
           return unsafe_reduction('malformed_status')
         end
+        if phase == 'active' && parsed.none? { |nick, _count| nick == current }
+          return unsafe_reduction('malformed_status')
+        end
         @phase = phase
         @current = current == '-' ? nil : current
         @top_card = top == '-' ? nil : top
@@ -245,6 +252,10 @@ module UnobotV2
         @status_anchor = [@current, @top_card]
         @private_status_seen = !@already_picked || @current != own_nick
         @private_draw_seen = false
+        @double_pending = false
+        @drawn_this_turn.clear
+        @private_penalty_draw.clear
+        @pending_count_assertions.clear
         %i[phase current top_card game_state stacked_cards already_picked players].each { |fact| @facts[fact] = 'exact' }
         if phase != 'active'
           @unsafe_reasons = ['game_not_active']
@@ -293,13 +304,15 @@ module UnobotV2
       end
 
       def counts(text)
-        pairs = text.split(/,\s*/).filter_map do |piece|
+        pairs = text.split(/,\s*/, -1).map do |piece|
           match = /\A(.+?) (\d+)\z/.match(piece)
-          [match[1], match[2].to_i] if match
+          return unsafe_reduction('malformed_card_count') unless match
+
+          [match[1], match[2].to_i]
         end
-        if pairs.empty?
-          uncertain!('malformed_card_count')
-          return Reduction.new(commands: resync_commands, changed: true)
+        names = pairs.map { |pair| pair.first.downcase }
+        if pairs.empty? || names.uniq.length != names.length
+          return unsafe_reduction('malformed_card_count')
         end
         @players = pairs.map(&:first) if @players.empty?
         @counts.merge!(pairs.to_h)
@@ -347,6 +360,10 @@ module UnobotV2
           return Reduction.new
         end
         @status_anchor = nil
+        if !passer && previous == own_nick && @already_picked &&
+           (was_double || Canonical::Cards.base(new_top) != @picked_card)
+          return unsafe_reduction('illegal_post_draw_play')
+        end
         if previous && !passer && !@rules.playable?(Canonical::Cards.base(new_top), @top_card, @mode)
           return unsafe_reduction('illegal_observed_play')
         end
@@ -369,8 +386,10 @@ module UnobotV2
                       0
                     elsif @stacked.positive?
                       @stacked
+                    elsif @drawn_this_turn[passer] || @already_picked
+                      0
                     else
-                      @drawn_this_turn[passer] ? 0 : 1
+                      return unsafe_reduction('unexpected_pass')
                     end
           if penalty.positive? && !increment(passer, penalty)
             return unsafe_reduction('missing_player_count')
@@ -475,7 +494,7 @@ module UnobotV2
 
           [match[1], match[2].to_i]
         end
-        return nil unless pairs.map(&:first).uniq.length == pairs.length
+        return nil unless pairs.map { |pair| pair.first.downcase }.uniq.length == pairs.length
 
         pairs
       end
