@@ -70,6 +70,7 @@ suites with:
 
 ```bash
 ruby -Itest test/stage7_engine_differential_test.rb
+BUNDLE_GEMFILE=test/e2e/Gemfile bundle exec ruby test/e2e/action_equivalence_test.rb
 ruby -Itest test/unobot_v2_test.rb
 ruby -Itest test/unobot_v2_machine_test.rb
 ruby -Itest test/unobot_v2_cinch_bridge_test.rb
@@ -81,6 +82,14 @@ ruby -Itest test/unobot_v2_neural_agent_test.rb
 
 Together these cover:
 
+- fifteen deterministic legal action boundaries plus one rejection through
+  two identical real Jedna games: the canonical path uses `ActionExecutor`,
+  while `ActionEncoder` output is applied by the actual `UnoPlugin#play`,
+  `#pick`, or `#pass` handler. Executor result codes, human acceptance or
+  rejection, and the complete post-action `GameStateSerializer` state must
+  agree. The cases guarantee play/draw/pass, post-draw play/pass, wild color,
+  ordinary and WD4 doubles, +2/WD4 responses and penalty stacks, and
+  single/double reverse and skip;
 - engine-generated single/double reverse parity through the actual host chunk
   codec, shuffled chunk reassembly, and the human reducer;
 - draw, playable/unplayable post-draw state and pass; +2/WD4 wars and penalty
@@ -95,9 +104,11 @@ Together these cover:
   saturated stdin, timeout, process crash/EOF, restart/backoff, cancellation,
   queue overflow, and clean process-group shutdown/reaping.
 
-The complete local IRC game additionally exercises actual network chunking,
-registration/autojoin, status resynchronization, ACK-before-next-state ordering,
-and clean shutdown. Randomly dealt live games cannot guarantee every rare card
-combination in one seed, so guaranteed effect/war/double cases remain in the
-deterministic suites while the live artifact records the combinations actually
-encountered.
+The complete local IRC game proves transport parity and additionally exercises
+actual network chunking, registration/autojoin, status resynchronization,
+ACK-before-next-state ordering, and clean shutdown. The deterministic action
+gate proves that an equivalent machine and human action produces the same next
+engine state; the live runner deliberately submits only the machine action.
+Randomly dealt live games cannot guarantee every rare card combination in one
+seed, so guaranteed effect/war/double cases remain in the deterministic suites
+while the live artifact records the combinations actually encountered.

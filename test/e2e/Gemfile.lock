@@ -16,6 +16,7 @@ GEM
     base64 (0.3.0)
     bigdecimal (4.1.2)
     logger (1.7.0)
+    minitest (5.27.0)
     monitor (0.2.0)
     ostruct (0.6.3)
     sequel (5.106.0)
@@ -30,6 +31,7 @@ DEPENDENCIES
   cinch!
   jedna!
   logger
+  minitest (~> 5.25)
   ostruct
   sequel
   sqlite3
