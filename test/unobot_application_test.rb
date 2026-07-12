@@ -54,7 +54,7 @@ class UnobotApplicationTest < Minitest::Test
       result = probe(
         'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'machine', 'UNO_STRATEGY' => 'neural',
         'UNO_TOURNAMENT_EXAMPLES' => File.join(ROOT, 'test/fixtures/neural_examples'),
-        'UNO_NEURAL_CHECKPOINT' => checkpoint
+        'UNO_NEURAL_CHECKPOINT' => checkpoint, 'UNO_NEURAL_PYTHON' => '/bin/true'
       )
       assert result[:status].success?, result[:stderr]
       assert_equal 'neural', result[:json].fetch('strategy')
