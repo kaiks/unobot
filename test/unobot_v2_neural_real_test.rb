@@ -24,6 +24,7 @@ class UnobotV2NeuralRealTest < Minitest::Test
         'UNO_STRATEGY' => 'neural',
         'UNO_TOURNAMENT_EXAMPLES' => examples,
         'UNO_NEURAL_CHECKPOINT' => checkpoint,
+        'UNO_NEURAL_PYTHON' => ENV.fetch('UNO_NEURAL_PYTHON', 'python3'),
         'UNO_NEURAL_COLD_TIMEOUT' => '20', 'UNO_NEURAL_WARM_TIMEOUT' => '2'
       }
     )
