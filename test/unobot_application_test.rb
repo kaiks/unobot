@@ -16,8 +16,12 @@ class UnobotApplicationTest < Minitest::Test
       bridge: !!$unobot_v2_bridge,
       strategy: $unobot_strategy_manager&.selected_name,
       shadow: $unobot_shadow_manager&.selected_name,
+      operations: !!$unobot_operations,
+      channels: $bot.config.channels,
+      host_nicks: $bot.config.host_nicks,
       plugins: $bot.config.plugins.plugins.map(&:name)
     )
+    $unobot_operations&.stop
     $unobot_v2_bridge&.stop
   RUBY
 
@@ -99,6 +103,21 @@ class UnobotApplicationTest < Minitest::Test
     end
   end
 
+  def test_v2_wires_permissioned_operations_and_deployment_allowlists_from_environment
+    Dir.mktmpdir('unobot-operations') do |directory|
+      result = probe(
+        'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'human', 'UNO_STRATEGY' => 'simple',
+        'UNO_OPERATIONS_SOCKET' => File.join(directory, 'control.sock'),
+        'UNO_CHANNELS' => '#test', 'UNO_HOST_NICKS' => 'Host,Host_',
+        'UNO_ADMIN_NICKS' => 'Operator', 'IRC_NICK' => 'neuralbot'
+      )
+      assert result[:status].success?, result[:stderr]
+      assert_equal true, result[:json].fetch('operations')
+      assert_equal ['#test'], result[:json].fetch('channels')
+      assert_equal %w[Host Host_], result[:json].fetch('host_nicks')
+    end
+  end
+
   def test_legacy_rejects_strategy_or_messaging_settings_it_cannot_honor
     strategy = probe('UNO_RUNTIME' => 'legacy', 'UNO_STRATEGY' => 'simple')
     refute strategy[:status].success?
@@ -121,7 +140,9 @@ class UnobotApplicationTest < Minitest::Test
       'UNO_TOURNAMENT_EXAMPLES' => nil, 'UNO_SIMPLE_ARGV' => nil,
       'UNO_CRUSHING_ARGV' => nil, 'UNO_NEURAL_CHECKPOINT' => nil,
       'UNO_NEURAL_PYTHON' => nil, 'UNO_NEURAL_STOCHASTIC' => nil,
-      'UNO_SHADOW_STRATEGY' => nil
+      'UNO_SHADOW_STRATEGY' => nil, 'UNO_OPERATIONS_SOCKET' => nil,
+      'UNO_OPERATIONS_TIMEOUT' => nil, 'UNO_CHANNELS' => nil,
+      'UNO_HOST_NICKS' => nil, 'UNO_ADMIN_NICKS' => nil, 'IRC_NICK' => nil
     }
     stdout, stderr, status = Open3.capture3(
       clean.merge(environment), RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', PROBE,

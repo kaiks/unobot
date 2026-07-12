@@ -119,6 +119,28 @@ module UnobotV2
       true
     end
 
+    def diagnostics
+      adapter_states = @channels.to_h do |channel|
+        adapter = adapter_for(channel)
+        request = adapter.respond_to?(:active_request) ? adapter.active_request : nil
+        metadata = request&.metadata || {}
+        [channel, {
+          lifecycle: adapter.respond_to?(:lifecycle) ? adapter.lifecycle : nil,
+          game_id: adapter.respond_to?(:game_id) ? adapter.game_id : metadata[:game_id],
+          decision_id: metadata[:decision_id],
+          last_error: adapter.respond_to?(:last_error) ? adapter.last_error : nil
+        }.compact.freeze]
+      end
+      {
+        messaging: mode, callback_error_count: @callback_errors.length,
+        ingress: ingress.consumer.respond_to?(:diagnostics) ? ingress.consumer.diagnostics : {},
+        channels: adapter_states.freeze
+      }.freeze
+    rescue StandardError
+      { messaging: mode, callback_error_count: @callback_errors.length,
+        diagnostic_error: true }.freeze
+    end
+
     # Live machine -> human fallback is intentionally explicit and disabled by
     # default. It unregisters and invalidates every machine session before a
     # completely fresh human reducer requests `us` + `ca`. No state is merged.

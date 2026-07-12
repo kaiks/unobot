@@ -73,6 +73,20 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     assert_equal 'draw', agent.decide(request).action
   end
 
+  def test_operator_health_check_runs_again_against_the_same_warm_process
+    agent = neural('persistent_valid', start: false)
+    agent.startup_health_check!
+    process = agent.instance_variable_get(:@process)
+    pid = process.instance_variable_get(:@wait_thread).pid
+    generation = process.diagnostics.fetch(:generation)
+
+    assert_same agent, agent.health_check!
+    assert_equal pid, process.instance_variable_get(:@wait_thread).pid
+    assert_operator process.diagnostics.fetch(:generation), :>, generation
+    assert_equal :ready, agent.diagnostics[:health]
+    assert_equal false, agent.diagnostics[:game_active]
+  end
+
   def test_idle_process_death_marks_replacement_cold_instead_of_reusing_warm_deadline
     agent = neural('persistent_exit_slow')
     assert_equal 'draw', agent.decide(request).action

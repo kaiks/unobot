@@ -69,5 +69,15 @@ if UNOBOT_RUNTIME == 'v2'
   $unobot_v2_bridge = UnobotV2::CinchBridge.new(
     bot: $bot, strategy: $unobot_strategy, env: ENV
   ).attach!
+  operations_socket = ENV.fetch('UNO_OPERATIONS_SOCKET', '').strip
+  unless operations_socket.empty?
+    $unobot_operations = UnobotV2::Operations.new(
+      socket_path: operations_socket, bridge: $unobot_v2_bridge,
+      primary: $unobot_strategy_manager, shadow: $unobot_shadow_manager,
+      timeout: Float(ENV.fetch('UNO_OPERATIONS_TIMEOUT', '5')),
+      on_restart: -> { $bot.quit('operator requested restart') }
+    ).start
+  end
+  at_exit { $unobot_operations&.stop }
   at_exit { $unobot_v2_bridge&.stop }
 end

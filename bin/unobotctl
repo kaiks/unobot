@@ -1,0 +1,23 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'json'
+require 'socket'
+
+socket_path = ENV.fetch('UNO_OPERATIONS_SOCKET', '/run/unobot/control.sock')
+command = ARGV.shift || 'status'
+request = { command: command }
+request[:strategy] = ARGV.shift if command == 'select'
+
+begin
+  socket = UNIXSocket.new(socket_path)
+  socket.write(JSON.generate(request) << "\n")
+  response = JSON.parse(socket.gets || '{}')
+  puts JSON.generate(response)
+  exit(response['ok'] ? 0 : 1)
+rescue StandardError
+  warn 'unobot operations socket is unavailable'
+  exit 2
+ensure
+  socket&.close
+end

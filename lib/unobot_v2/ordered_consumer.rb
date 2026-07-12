@@ -10,7 +10,10 @@ module UnobotV2
     def initialize(capacity: 1_024, on_error: nil, &consumer)
       raise ArgumentError, 'consumer is required' unless consumer
 
-      @queue = SizedQueue.new(capacity)
+      @capacity = Integer(capacity)
+      raise ArgumentError, 'capacity must be positive' unless @capacity.positive?
+
+      @queue = SizedQueue.new(@capacity)
       @consumer = consumer
       @on_error = on_error
       @errors = Queue.new
@@ -58,6 +61,15 @@ module UnobotV2
 
     def worker_thread?
       @mutex.synchronize { @thread == Thread.current }
+    end
+
+    def diagnostics
+      @mutex.synchronize do
+        {
+          alive: !!@thread&.alive?, queue_depth: @queue.length,
+          queue_capacity: @capacity, error_count: @errors.length
+        }.freeze
+      end
     end
 
     private

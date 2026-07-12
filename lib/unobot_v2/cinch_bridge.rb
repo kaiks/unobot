@@ -65,6 +65,7 @@ module UnobotV2
               "injected runtime mode #{@runtime.mode.inspect} does not match UNO_MESSAGING #{configured_mode.inspect}"
       end
       @queue = SizedQueue.new(queue_capacity)
+      @queue_capacity = Integer(queue_capacity)
       @errors = Queue.new
       @tick_interval = Float(tick_interval)
       raise ArgumentError, 'tick interval must be positive' unless @tick_interval.positive?
@@ -132,6 +133,19 @@ module UnobotV2
     def on_nick(message) = enqueue(snapshot_nick(message))
     def on_leaving(message, affected_user) = enqueue(snapshot_leaving(message, affected_user))
     def tick = enqueue(Snapshot.new(kind: :tick))
+
+    def diagnostics
+      {
+        mode: mode, attached: @attached, started: @started, stopped: @stopped,
+        connected_once: @connected_once, joined_channels: @joined.to_a.sort.freeze,
+        configured_channels: @channels, accepting: accepting?,
+        worker_alive: !!@worker&.alive?, timer_alive: !!@timer&.alive?,
+        queue_depth: @queue.length, queue_capacity: @queue_capacity,
+        error_count: @errors.length, runtime: runtime.diagnostics
+      }.freeze
+    rescue StandardError
+      { mode: mode, diagnostic_error: true }.freeze
+    end
 
     private
 

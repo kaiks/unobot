@@ -76,6 +76,8 @@ class UnobotV2StrategyManagerTest < Minitest::Test
 
       self
     end
+
+    def health_check! = startup_health_check!
   end
 
   def machine_request(game: 'g1', transport: 'machine', generation: 1,
@@ -335,6 +337,48 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     assert_equal 'simple', manager.selected_name
     assert neural.shutdown?
     refute_includes manager.instance_variable_get(:@all_instances), neural
+  ensure
+    manager&.shutdown
+  end
+
+  def test_operator_health_reload_reuses_standby_strategy_and_is_visible_in_diagnostics
+    neural = HealthCheckedStrategy.new
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', factories: { neural: -> { neural } }
+    )
+
+    assert_equal 1, neural.health_checks
+    assert_predicate manager.health_check, :success?
+    assert_equal 2, neural.health_checks
+    assert_equal 1, manager.diagnostics.fetch(:standby).fetch('neural').length
+  ensure
+    manager&.shutdown
+  end
+
+  def test_operator_health_reload_is_refused_while_game_is_active
+    neural = HealthCheckedStrategy.new
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', factories: { neural: -> { neural } }
+    )
+    manager.decide(machine_request)
+
+    result = manager.health_check
+    assert_equal :game_active, result.code
+    assert_equal 1, neural.health_checks
+  ensure
+    manager&.shutdown
+  end
+
+  def test_operator_health_reload_sanitizes_strategy_failure
+    neural = HealthCheckedStrategy.new
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', factories: { neural: -> { neural } }
+    )
+    neural.instance_variable_set(:@fail_health, true)
+
+    result = manager.health_check
+    assert_equal :health_failed, result.code
+    assert_equal 'strategy health check failed', result.message
   ensure
     manager&.shutdown
   end

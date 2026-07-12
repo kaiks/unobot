@@ -112,6 +112,17 @@ module UnobotV2
     def startup_health_check!
       return self if @mutex.synchronize { @health == :ready } && @process.running?
 
+      perform_health_check!
+    end
+
+    # Operator reloads deliberately execute a fresh reserved inference even
+    # when the process is already warm. This verifies the model without
+    # exposing a live game request or spawning a second 378 MiB process.
+    def health_check!
+      perform_health_check!
+    end
+
+    def perform_health_check!
       start_game(HEALTH_GAME_KEY)
       decide(startup_health_request)
       end_game(HEALTH_GAME_KEY, reason: 'startup_health_checked')

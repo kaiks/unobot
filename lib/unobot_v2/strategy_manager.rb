@@ -145,6 +145,11 @@ module UnobotV2
         {
           selected: @selected_name, active_games: @sessions.keys.sort.freeze,
           shutdown: @shutdown,
+          standby: @idle.transform_values do |strategies|
+            strategies.map do |strategy|
+              strategy.respond_to?(:diagnostics) ? strategy.diagnostics : { status: :available }
+            end.freeze
+          end.freeze,
           sessions: @sessions.transform_values do |session|
             details = session.strategy.respond_to?(:diagnostics) ? session.strategy.diagnostics : { status: :available }
             { strategy: session.name, diagnostics: details }.freeze
@@ -155,6 +160,33 @@ module UnobotV2
 
     def active_game_keys = @mutex.synchronize { @sessions.keys.sort.freeze }
     def active? = @mutex.synchronize { !@sessions.empty? }
+
+    # Re-run the selected strategy's bounded startup health check without
+    # allowing a game to activate midway through it. Stock strategies have no
+    # active health operation; neural performs a real checkpoint inference.
+    def health_check
+      @mutex.synchronize do
+        return Result.new(code: :shutdown, message: 'strategy manager is shut down', strategy: @selected_name) if @shutdown
+        unless @sessions.empty?
+          return Result.new(code: :game_active, message: 'health reload is disabled during a game',
+                            strategy: @selected_name, game_key: @sessions.keys.sort.join(','))
+        end
+
+        strategy = @idle[@selected_name].first
+        raise Configuration::Error, "no standby #{@selected_name} strategy is available" unless strategy
+
+        if strategy.respond_to?(:health_check!)
+          strategy.health_check!
+        elsif strategy.respond_to?(:startup_health_check!)
+          strategy.startup_health_check!
+        end
+      end
+      status(:health_checked, nil, strategy: selected_name)
+      Result.new(code: :ok, strategy: selected_name)
+    rescue StandardError => error
+      status(:health_failed, error.message, strategy: selected_name)
+      Result.new(code: :health_failed, message: 'strategy health check failed', strategy: selected_name)
+    end
 
     private
 
