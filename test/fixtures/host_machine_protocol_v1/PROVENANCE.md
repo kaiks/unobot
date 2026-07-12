@@ -11,3 +11,9 @@ EVENT lines are emitted by the same accepted codec.
 
 The fixture is copied data. Runtime code and tests do not load either source
 repository.
+
+SHA-256:
+
+- `frames.json`: `61453355ea26307c5beef4c335f08338b61095ea98c80220956e7f299000bf87`
+- wrapped `request_action_normal.json`:
+  `35b07cfc20dd202e3b762c651a7ecb4e09522d01c46d23209d398357c52ae333`

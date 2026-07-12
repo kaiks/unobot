@@ -26,6 +26,7 @@ module UnobotV2
         @mutex = Mutex.new
         @errors = Queue.new
         @on_error = on_error
+        @started = false
         configure_tokens
         @consumer = OrderedConsumer.new(capacity: queue_capacity, on_error: method(:consumer_error)) do |envelope|
           process(envelope)
@@ -33,15 +34,25 @@ module UnobotV2
       end
 
       def start
+        return self if @started
+
         consumer.start
         adapters.each_value(&:start)
+        @started = true
         self
       end
 
       def stop
+        return self unless @started
+
         consumer.stop
         adapters.each_value(&:stop!)
+        @started = false
         self
+      end
+
+      def tick
+        enqueue(Event.new(kind: :tick))
       end
 
       # IRC callbacks only allocate this envelope and perform a nonblocking
@@ -119,6 +130,8 @@ module UnobotV2
       def process_lifecycle(event)
         selected = event.channel ? [adapter_for(event.channel)].compact : adapters.values
         case event.kind
+        when :tick
+          selected.each(&:tick)
         when :disconnect
           selected.each(&:disconnect!)
           @game_sessions.clear

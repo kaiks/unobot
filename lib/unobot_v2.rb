@@ -15,6 +15,9 @@ require_relative 'unobot_v2/machine/adapter'
 require_relative 'unobot_v2/machine/ingress'
 require_relative 'unobot_v2/session_manager'
 require_relative 'unobot_v2/controller'
+require_relative 'unobot_v2/configuration'
+require_relative 'unobot_v2/messaging_factory'
+require_relative 'unobot_v2/runtime'
 
 module UnobotV2
   PROTOCOL_VERSION = 1

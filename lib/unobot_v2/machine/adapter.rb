@@ -43,6 +43,7 @@ module UnobotV2
       end
 
       def start
+        @lifecycle = :unregistered if lifecycle == :stopped
         register!
       end
 

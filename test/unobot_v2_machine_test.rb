@@ -468,3 +468,232 @@ class UnobotV2MachineIngressTest < Minitest::Test
     ingress.stop
   end
 end
+
+class UnobotV2MessagingContractTest < Minitest::Test
+  FIXTURE_PATH = UnobotV2MachineProtocolTest::FIXTURE_PATH
+
+  def setup
+    @fixture = JSON.parse(File.read(FIXTURE_PATH))
+  end
+
+  def test_machine_human_and_jedna_fixture_states_are_identical
+    machine_requests = []
+    machine = UnobotV2::MessagingFactory.build(
+      mode: 'machine', channel: '#uno', own_nick: 'Alice', host_nicks: ['Host'],
+      transport: ->(_target, _line) {}, on_request: ->(request) { machine_requests << request }
+    )
+    machine.start
+    machine.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value)
+    @fixture.fetch('state_lines').each do |line|
+      machine.receive(UnobotV2::Machine::Protocol.parse(line).value)
+    end
+
+    human_requests = []
+    human = UnobotV2::MessagingFactory.build(
+      mode: 'human', channel: '#uno', own_nick: 'Alice', host_nicks: ['Host'],
+      transport: ->(_target, _line) {}, on_request: ->(request) { human_requests << request }
+    )
+    human.receive(human_event(
+      'UNO_STATUS_V1 phase=active current=Alice top=r7 mode=normal ' \
+      'stacked_cards=0 already_picked=0 players=Alice:3,Bob:2,Carol:1', private: true
+    ))
+    human.receive(human_event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true))
+    human.receive(human_event("\x034[2] \x0312[5] \x0313[WD4]", private: true))
+
+    fixture_state = JSON.parse(File.read(UnobotV2MachineProtocolTest::JEDNA_PATH)).fetch('state')
+    expected = fixture_state.transform_keys(&:to_sym)
+    expected[:other_players] = expected[:other_players].map { |player| player.transform_keys(&:to_sym) }
+    assert_equal 1, machine_requests.length
+    assert_equal 1, human_requests.length
+    assert_equal expected, machine_requests.first.state_h
+    assert_equal machine_requests.first.state_h, human_requests.first.state_h
+  end
+
+  def test_same_fake_strategy_and_adapter_boundary_accept_canonical_draw_for_both_modes
+    seen = []
+    strategy = UnobotV2::LegacyStrategyAdapter.new do |request|
+      seen << request
+      { action: 'draw' }
+    end
+
+    human_sent = []
+    human = nil
+    human = UnobotV2::MessagingFactory.build(
+      mode: 'human', channel: '#uno', own_nick: 'Alice', host_nicks: ['Host'],
+      transport: ->(target, line) { human_sent << [target, line] },
+      on_request: lambda do |request|
+        human.submit(strategy.decide(request), decision_id: request.decision_id)
+      end
+    )
+    human.receive(human_event(
+      'UNO_STATUS_V1 phase=active current=Alice top=r7 mode=normal ' \
+      'stacked_cards=0 already_picked=0 players=Alice:3,Bob:2,Carol:1', private: true
+    ))
+    human.receive(human_event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true))
+    human.receive(human_event("\x034[2] \x0312[5] \x0313[WD4]", private: true))
+    assert_equal ['#uno', 'pe'], human_sent.last
+
+    machine_sent = []
+    machine = nil
+    machine = UnobotV2::MessagingFactory.build(
+      mode: 'machine', channel: '#uno', own_nick: 'Alice', host_nicks: ['Host'],
+      transport: ->(target, line) { machine_sent << [target, line] },
+      on_request: lambda do |request|
+        machine.submit(strategy.decide(request), decision_id: request.decision_id)
+      end
+    )
+    machine.start
+    machine.receive(UnobotV2::Machine::Protocol.parse(@fixture.fetch('registered_line')).value)
+    @fixture.fetch('state_lines').each do |line|
+      machine.receive(UnobotV2::Machine::Protocol.parse(line).value)
+    end
+    assert_equal 2, seen.length
+    assert_equal seen.first.state_h, seen.last.state_h
+    assert_equal 'Host', machine_sent.last.first
+    assert_includes machine_sent.last.last, 'UNO_MACHINE_V1 ACTION '
+  end
+
+  private
+
+  def human_event(text, private: false)
+    UnobotV2::Human::Event.new(
+      channel: '#uno', source: 'Host', recipient: 'Alice', text: text, private: private
+    )
+  end
+end
+
+class UnobotV2RuntimeSelectionTest < Minitest::Test
+  FIXTURE_PATH = UnobotV2MachineProtocolTest::FIXTURE_PATH
+
+  RecordingStrategy = Struct.new(:seen) do
+    def decide(request)
+      seen << [request, Thread.current]
+      UnobotV2::Canonical::Action.new(action: 'draw')
+    end
+  end
+
+  def setup
+    @fixture = JSON.parse(File.read(FIXTURE_PATH))
+    @sent = Queue.new
+    @submitted = Queue.new
+    @seen = []
+    @strategy = RecordingStrategy.new(@seen)
+    @producer = Thread.current
+  end
+
+  def test_environment_default_explicit_selection_and_invalid_values
+    assert_equal 'human', UnobotV2::Configuration.messaging({})
+    assert_equal 'machine', UnobotV2::Configuration.messaging('UNO_MESSAGING' => 'machine')
+    assert_equal true,
+                 UnobotV2::Configuration.fallback_enabled?('UNO_MACHINE_HUMAN_FALLBACK' => 'yes')
+    assert_raises(UnobotV2::Configuration::Error) do
+      UnobotV2::Configuration.messaging('UNO_MESSAGING' => 'automatic')
+    end
+    assert_raises(UnobotV2::Configuration::Error) do
+      UnobotV2::Runtime.from_env(
+        strategy: @strategy, channels: ['#uno'], own_nick: 'Alice', host_nicks: ['Host'],
+        transport: method(:send_line), env: { 'UNO_MESSAGING' => 'broken' }
+      )
+    end
+  end
+
+  def test_opt_in_runtime_runs_same_strategy_off_callback_thread_in_both_modes
+    human = runtime('human').start
+    enqueue_human_snapshot(human)
+    wait_for { @submitted.size == 1 }
+    human_submission, = @submitted.pop
+    assert_predicate human_submission, :success?
+    assert_equal 'pe', @sent.pop[1]
+    refute_same @producer, @seen.last[1]
+    human.stop
+
+    machine = runtime('machine').start
+    assert_equal '.uno machine register', @sent.pop[1]
+    machine.enqueue(machine_notice(@fixture.fetch('registered_line')))
+    @fixture.fetch('state_lines').each { |line| machine.enqueue(machine_notice(line)) }
+    wait_for { @submitted.size == 1 }
+    machine_submission, = @submitted.pop
+    assert_predicate machine_submission, :success?
+    assert_includes @sent.pop[1], 'UNO_MACHINE_V1 ACTION '
+    refute_same @producer, @seen.last[1]
+    assert_equal @seen[-2][0].state_h, @seen[-1][0].state_h
+    machine.stop
+  end
+
+  def test_controlled_machine_to_human_fallback_never_merges_partial_state
+    runtime = runtime('machine', fallback_enabled: true).start
+    assert_equal '.uno machine register', @sent.pop[1]
+    result = runtime.transition_to('human')
+    assert_predicate result, :success?
+    assert_equal 'human', runtime.mode
+    assert_equal ['.uno machine unregister', 'us', 'ca'], 3.times.map { @sent.pop[1] }
+    assert_empty @seen
+
+    runtime.enqueue(human_event(
+      'UNO_STATUS_V1 phase=active current=Alice top=r7 mode=normal ' \
+      'stacked_cards=0 already_picked=0 players=Alice:3,Bob:2,Carol:1', private: true
+    ))
+    runtime.enqueue(human_event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true))
+    sleep 0.01
+    assert_empty @seen, 'partial fallback snapshot must not invoke strategy'
+    runtime.enqueue(human_event("\x034[2] \x0312[5] \x0313[WD4]", private: true))
+    wait_for { @submitted.size == 1 }
+    assert_equal 1, @seen.length
+    assert_equal 'human', @seen.first.first.metadata[:transport]
+    runtime.stop
+  end
+
+  def test_fallback_defaults_disabled_and_human_to_machine_requires_restart
+    machine = runtime('machine')
+    result = machine.transition_to('human')
+    assert_equal :fallback_disabled, result.code
+    assert_equal 'machine', machine.mode
+
+    human = runtime('human')
+    result = human.transition_to('machine')
+    assert_predicate result, :restart_required?
+    assert_equal 'human', human.mode
+  end
+
+  private
+
+  def runtime(mode, fallback_enabled: false)
+    UnobotV2::Runtime.new(
+      messaging: mode, strategy: @strategy, channels: ['#uno'], own_nick: 'Alice',
+      host_nicks: ['Host'], transport: method(:send_line), fallback_enabled: fallback_enabled,
+      on_submission: ->(result, request) { @submitted << [result, request] }
+    )
+  end
+
+  def send_line(target, line)
+    @sent << [target, line, Thread.current]
+  end
+
+  def enqueue_human_snapshot(runtime)
+    runtime.enqueue(human_event(
+      'UNO_STATUS_V1 phase=active current=Alice top=r7 mode=normal ' \
+      'stacked_cards=0 already_picked=0 players=Alice:3,Bob:2,Carol:1', private: true
+    ))
+    runtime.enqueue(human_event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true))
+    runtime.enqueue(human_event("\x034[2] \x0312[5] \x0313[WD4]", private: true))
+  end
+
+  def human_event(text, private: false)
+    UnobotV2::Human::Event.new(
+      channel: '#uno', source: 'Host', recipient: 'Alice', text: text, private: private
+    )
+  end
+
+  def machine_notice(text)
+    UnobotV2::Machine::Event.new(source: 'Host', recipient: 'Alice', text: text)
+  end
+
+  def wait_for(timeout: 1)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    until yield
+      raise 'timed out waiting for async runtime' if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+      Thread.pass
+    end
+  end
+end
