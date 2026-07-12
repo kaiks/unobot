@@ -7,6 +7,7 @@ require_relative '../lib/unobot_v2'
 
 class UnobotV2NeuralAgentTest < Minitest::Test
   PROCESS_FIXTURE = File.expand_path('fixtures/process_agents/protocol_agent.rb', __dir__)
+  FAKE_PYTHON = File.expand_path('fixtures/process_agents/fake_python.rb', __dir__)
   EXAMPLES_FIXTURE = File.expand_path('fixtures/neural_examples', __dir__)
 
   def teardown
@@ -94,7 +95,7 @@ class UnobotV2NeuralAgentTest < Minitest::Test
       base = {
         'UNO_TOURNAMENT_EXAMPLES' => EXAMPLES_FIXTURE,
         'UNO_NEURAL_CHECKPOINT' => checkpoint,
-        'UNO_NEURAL_PYTHON' => ENV.fetch('PYTHON', 'python3'),
+        'UNO_NEURAL_PYTHON' => FAKE_PYTHON,
         'UNO_NEURAL_COLD_TIMEOUT' => '2', 'UNO_NEURAL_WARM_TIMEOUT' => '1'
       }
 
