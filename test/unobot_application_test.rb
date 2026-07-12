@@ -19,6 +19,7 @@ class UnobotApplicationTest < Minitest::Test
       operations: !!$unobot_operations,
       channels: $bot.config.channels,
       host_nicks: $bot.config.host_nicks,
+      port: $bot.config.port,
       plugins: $bot.config.plugins.plugins.map(&:name)
     )
     $unobot_operations&.stop
@@ -109,12 +110,14 @@ class UnobotApplicationTest < Minitest::Test
         'UNO_RUNTIME' => 'v2', 'UNO_MESSAGING' => 'human', 'UNO_STRATEGY' => 'simple',
         'UNO_OPERATIONS_SOCKET' => File.join(directory, 'control.sock'),
         'UNO_CHANNELS' => '#test', 'UNO_HOST_NICKS' => 'Host,Host_',
-        'UNO_ADMIN_NICKS' => 'Operator', 'IRC_NICK' => 'neuralbot'
+        'UNO_ADMIN_NICKS' => 'Operator', 'IRC_NICK' => 'neuralbot',
+        'IRC_PORT' => '16667'
       )
       assert result[:status].success?, result[:stderr]
       assert_equal true, result[:json].fetch('operations')
       assert_equal ['#test'], result[:json].fetch('channels')
       assert_equal %w[Host Host_], result[:json].fetch('host_nicks')
+      assert_equal 16_667, result[:json].fetch('port')
     end
   end
 
@@ -142,7 +145,8 @@ class UnobotApplicationTest < Minitest::Test
       'UNO_NEURAL_PYTHON' => nil, 'UNO_NEURAL_STOCHASTIC' => nil,
       'UNO_SHADOW_STRATEGY' => nil, 'UNO_OPERATIONS_SOCKET' => nil,
       'UNO_OPERATIONS_TIMEOUT' => nil, 'UNO_CHANNELS' => nil,
-      'UNO_HOST_NICKS' => nil, 'UNO_ADMIN_NICKS' => nil, 'IRC_NICK' => nil
+      'UNO_HOST_NICKS' => nil, 'UNO_ADMIN_NICKS' => nil, 'IRC_NICK' => nil,
+      'IRC_PORT' => nil
     }
     stdout, stderr, status = Open3.capture3(
       clean.merge(environment), RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', PROBE,

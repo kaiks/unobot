@@ -22,5 +22,6 @@ module BotConfig
   MESSAGES_PER_SECOND = Integer(ENV.fetch('IRC_MESSAGES_PER_SECOND', '2'))
   # Use host.docker.internal for Mac/Windows, or host network mode on Linux
   SERVER = ENV['IRC_SERVER'] || 'host.docker.internal'.freeze
+  PORT = Integer(ENV.fetch('IRC_PORT', '6667'))
   CHANNELS = list('UNO_CHANNELS', ['#kx'])
 end

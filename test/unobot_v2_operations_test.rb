@@ -142,6 +142,20 @@ class UnobotV2OperationsTest < Minitest::Test
     assert_equal :unhealthy, health[:code]
   end
 
+  def test_health_fails_when_ready_model_process_is_not_running
+    @primary = FakeManager.new
+    diagnostics = @primary.method(:diagnostics)
+    @primary.define_singleton_method(:diagnostics) do
+      value = diagnostics.call
+      value[:standby]['neural'][0][:running] = false
+      value
+    end
+
+    response = build.dispatch('command' => 'health')
+    refute response[:ok]
+    assert_equal :unhealthy, response[:code]
+  end
+
   def test_reload_checks_live_and_shadow_models_and_refuses_active_games
     shadow = FakeManager.new
     operations = build(shadow: shadow)
@@ -219,6 +233,26 @@ class UnobotV2OperationsTest < Minitest::Test
 
     operations.stop
     refute File.exist?(@socket)
+  end
+
+  def test_socket_refuses_shared_or_symlink_parent_without_changing_permissions
+    shared = File.join(@directory, 'shared')
+    Dir.mkdir(shared, 0o755)
+    before = File.stat(shared).mode & 0o777
+    operations = UnobotV2::Operations.new(
+      socket_path: File.join(shared, 'control.sock'), bridge: @bridge, primary: @primary
+    )
+    assert_raises(SecurityError) { operations.start }
+    assert_equal before, File.stat(shared).mode & 0o777
+
+    target = File.join(@directory, 'private')
+    Dir.mkdir(target, 0o700)
+    link = File.join(@directory, 'linked')
+    File.symlink(target, link)
+    operations = UnobotV2::Operations.new(
+      socket_path: File.join(link, 'control.sock'), bridge: @bridge, primary: @primary
+    )
+    assert_raises(SecurityError) { operations.start }
   end
 
   private

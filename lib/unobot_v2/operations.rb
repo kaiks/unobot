@@ -85,16 +85,34 @@ module UnobotV2
 
     def prepare_socket!
       directory = File.dirname(socket_path)
-      FileUtils.mkdir_p(directory, mode: 0o700)
-      File.chmod(0o700, directory)
+      prepare_directory!(directory)
       remove_socket
       @server = UNIXServer.new(socket_path)
       File.chmod(0o600, socket_path)
     end
 
+    def prepare_directory!(directory)
+      if File.exist?(directory) || File.symlink?(directory)
+        stat = File.lstat(directory)
+        unless stat.directory? && !stat.symlink? && stat.uid == Process.uid && (stat.mode & 0o077).zero?
+          raise SecurityError, 'operations directory must be private, owned, and must not be a symlink'
+        end
+        return
+      end
+
+      parent = File.dirname(directory)
+      parent_stat = File.lstat(parent)
+      raise SecurityError, 'operations parent must be a real directory' unless parent_stat.directory? && !parent_stat.symlink?
+
+      Dir.mkdir(directory, 0o700)
+    end
+
     def remove_socket
       return unless File.exist?(socket_path) || File.socket?(socket_path)
-      raise SecurityError, 'refusing to replace a non-socket operations path' unless File.socket?(socket_path)
+      stat = File.lstat(socket_path)
+      unless stat.socket? && !stat.symlink? && stat.uid == Process.uid
+        raise SecurityError, 'refusing to replace an unowned or non-socket operations path'
+      end
 
       File.unlink(socket_path)
     rescue Errno::ENOENT
@@ -150,7 +168,8 @@ module UnobotV2
 
     def health
       payload = status_payload
-      healthy = payload.dig(:model, :health).to_s == 'ready' && payload.dig(:bridge, :worker_alive)
+      healthy = payload.dig(:model, :health).to_s == 'ready' && payload.dig(:model, :running) &&
+                payload.dig(:bridge, :worker_alive)
       healthy ? success(payload) : failure(:unhealthy, 'model or bridge is not healthy', payload)
     end
 
@@ -158,7 +177,8 @@ module UnobotV2
       payload = status_payload
       channels = payload.dig(:bridge, :configured_channels) || []
       joined = payload.dig(:bridge, :joined_channels) || []
-      available = payload.dig(:model, :health).to_s == 'ready' && payload.dig(:bridge, :started) &&
+      available = payload.dig(:model, :health).to_s == 'ready' && payload.dig(:model, :running) &&
+                  payload.dig(:bridge, :started) &&
                   (channels - joined).empty?
       available ? success(payload) : failure(:not_ready, 'IRC session is not ready', payload)
     end

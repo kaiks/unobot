@@ -33,6 +33,7 @@ $last_acted_on_turn_message = Time.now
 $bot = Cinch::Bot.new do
   configure do |c|
     c.server              = BotConfig::SERVER
+    c.port                = BotConfig::PORT
     c.channels            = BotConfig::CHANNELS
     c.nick                = BotConfig::NICK
     c.host_nicks          = BotConfig::HOST_NICKS
