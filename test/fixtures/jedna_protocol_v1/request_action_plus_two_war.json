@@ -1,0 +1,16 @@
+{
+  "type": "request_action",
+  "protocol_version": 1,
+  "state": {
+    "your_id": "Alice",
+    "hand": ["r+2", "rr", "wd4", "b5"],
+    "top_card": "r+2",
+    "game_state": "war_+2",
+    "stacked_cards": 4,
+    "already_picked": false,
+    "picked_card": null,
+    "other_players": [{"id": "Bob", "card_count": 2}, {"id": "Carol", "card_count": 1}],
+    "available_actions": ["play", "pass"],
+    "playable_cards": ["r+2", "rr", "wd4"]
+  }
+}

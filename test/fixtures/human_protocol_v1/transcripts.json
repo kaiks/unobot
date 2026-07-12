@@ -1,0 +1,26 @@
+{
+  "provenance": "ZbojeiJureq f409d7a and Jedna 17ada20 IrcRenderer/Game notification strings",
+  "normal_start_draw_pass": [
+    {"scope":"channel","text":"Alice joins the game"},
+    {"scope":"channel","text":"Bob joins the game"},
+    {"scope":"channel","text":"Card count: Alice 2, Bob 2"},
+    {"scope":"private","recipient":"Alice","text":"\u00034[5] \u00033[3]"},
+    {"scope":"channel","text":"Alice's turn. Top card: \u00034[7]"},
+    {"scope":"channel","text":"Alice draws a card."},
+    {"scope":"private","recipient":"Alice","text":"You draw 1 card: \u000313[W]"},
+    {"scope":"channel","text":"Alice passes. Bob's turn. Top card: \u00034[7]"}
+  ],
+  "resync_after_draw": [
+    {"scope":"private","recipient":"Alice","text":"UNO_STATUS_V1 phase=active current=Alice top=r7 mode=normal stacked_cards=0 already_picked=1 players=Alice:2,Bob:2"},
+    {"scope":"private","recipient":"Alice","text":"UNO_STATUS_PRIVATE_V1 picked_card=r5"},
+    {"scope":"private","recipient":"Alice","text":"\u00033[3] \u00034[5]"}
+  ],
+  "war_reverse_double_and_end_messages": [
+    {"scope":"channel","text":"Next player must respond or draw 4 more cards (total 8)"},
+    {"scope":"channel","text":"Player order reversed!"},
+    {"scope":"channel","text":"Bob was skipped!"},
+    {"scope":"channel","text":"[Playing two cards]"},
+    {"scope":"channel","text":"Bob gains 30 points."},
+    {"scope":"channel","text":"Uno game has been stopped."}
+  ]
+}
