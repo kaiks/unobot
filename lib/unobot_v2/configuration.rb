@@ -33,6 +33,10 @@ module UnobotV2
       boolean(env.fetch('UNO_MACHINE_HUMAN_FALLBACK', 'false'), 'UNO_MACHINE_HUMAN_FALLBACK')
     end
 
+    def autojoin_enabled?(env = ENV)
+      boolean(env.fetch('UNO_AUTOJOIN', 'false'), 'UNO_AUTOJOIN')
+    end
+
     def boolean(value, label)
       value = value.to_s.downcase
       return true if TRUE_VALUES.include?(value)

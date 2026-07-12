@@ -10,6 +10,7 @@ module UnobotV2
   # callbacks in wire-dispatch order and performs only a nonblocking queue push.
   # Runtime controls, parsing, strategy calls, and transport run elsewhere.
   class CinchBridge
+    GAME_CREATED = /\AOk,? -? ?created .* game on /i
     Snapshot = Struct.new(:kind, :command, :source, :recipient, :channel, :text,
                           :old_nick, :new_nick, :affected_nick, keyword_init: true) do
       def initialize(**values)
@@ -43,6 +44,7 @@ module UnobotV2
       @channels = Array(channels || bot.config.channels).map { |value| value.to_s.downcase }.uniq.freeze
       @own_nick = (own_nick || bot.nick).to_s
       @host_nicks = Array(host_nicks || bot.config.host_nicks).map(&:to_s).freeze
+      @autojoin = Configuration.autojoin_enabled?(env)
       fallback = Configuration.fallback_enabled?(env)
       if configured_mode == 'human' && @channels.length != 1
         raise Configuration::Error, 'human v2 messaging requires exactly one channel for private notice correlation'
@@ -176,6 +178,7 @@ module UnobotV2
       elsif snapshot.text == "#{@own_nick} joins the game"
         runtime.resync(snapshot.channel, reason: 'uno_player_joined')
       end
+      transport(snapshot.channel, 'jo') if @autojoin && GAME_CREATED.match?(snapshot.text)
     end
 
     def process_private(snapshot)

@@ -138,6 +138,12 @@ UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing bundle exec ruby uno_
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=neural UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip bundle exec ruby uno_bot_starter.rb
 ```
 
+V2 does not join newly announced games unless the operator explicitly sets
+`UNO_AUTOJOIN=true`. When enabled, only a configured host's game-created line
+in a configured channel can trigger `jo`. Machine mode then registers again
+after the host confirms that this nick joined, replacing an earlier `no_game`
+or `not_player` registration attempt with authoritative game state.
+
 By default, agents are discovered in a sibling `jedna` checkout under
 `extension-gems/jedna-tournaments/examples`. Set
 `UNO_TOURNAMENT_EXAMPLES=/absolute/path/to/examples` elsewhere. An individual

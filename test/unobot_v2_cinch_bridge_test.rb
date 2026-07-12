@@ -191,6 +191,52 @@ class UnobotV2CinchBridgeTest < Minitest::Test
     assert_equal '.uno machine register', pop(@bot.channel_targets['#uno'].messages)[0]
   end
 
+  def test_explicit_autojoin_joins_trusted_games_and_reregisters_after_player_join
+    @bridge = UnobotV2::CinchBridge.new(
+      bot: @bot, strategy: @strategy,
+      env: { 'UNO_MESSAGING' => 'machine', 'UNO_AUTOJOIN' => 'true' },
+      tick_interval: 0.01
+    ).attach!
+    @bridge.on_join(fake_message(command: 'JOIN', source: 'Alice', channel: '#uno'))
+    assert_equal '.uno machine register', pop(@bot.channel_targets['#uno'].messages)[0]
+
+    @bridge.on_channel(fake_message(
+      command: 'PRIVMSG', source: 'Host', channel: '#uno', recipient: '#uno',
+      text: "Ok, created casual \x02\x0304U\x0309N\x0312O\x0308!\x0f game on #uno, say 'jo' to join in"
+    ))
+    assert_equal 'jo', pop(@bot.channel_targets['#uno'].messages)[0]
+
+    @bridge.on_channel(fake_message(command: 'PRIVMSG', source: 'Host', channel: '#uno',
+                                    recipient: '#uno', text: 'Alice joins the game'))
+    assert_equal '.uno machine register', pop(@bot.channel_targets['#uno'].messages)[0]
+
+    @bridge.on_channel(fake_message(
+      command: 'PRIVMSG', source: 'Mallory', channel: '#uno', recipient: '#uno',
+      text: "Ok, created casual UNO game on #uno, say 'jo' to join in"
+    ))
+    sleep 0.01
+    assert @bot.channel_targets['#uno'].messages.empty?
+  end
+
+  def test_autojoin_is_disabled_by_default_and_rejects_invalid_configuration
+    @bridge = build_bridge('machine').attach!
+    @bridge.on_join(fake_message(command: 'JOIN', source: 'Alice', channel: '#uno'))
+    pop(@bot.channel_targets['#uno'].messages)
+    @bridge.on_channel(fake_message(
+      command: 'PRIVMSG', source: 'Host', channel: '#uno', recipient: '#uno',
+      text: "Ok, created casual UNO game on #uno, say 'jo' to join in"
+    ))
+    sleep 0.01
+    assert @bot.channel_targets['#uno'].messages.empty?
+
+    assert_raises(UnobotV2::Configuration::Error) do
+      UnobotV2::CinchBridge.new(
+        bot: @bot, strategy: @strategy,
+        env: { 'UNO_MESSAGING' => 'machine', 'UNO_AUTOJOIN' => 'sometimes' }
+      )
+    end
+  end
+
   def test_transport_rejects_untrusted_target_and_bridge_queue_callbacks_are_nonblocking
     @bridge = build_bridge('machine').attach!
     assert_raises(ArgumentError) { @bridge.send(:transport, 'Mallory', 'unsafe') }
