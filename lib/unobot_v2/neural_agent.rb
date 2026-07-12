@@ -41,13 +41,17 @@ module UnobotV2
     def retry_capable? = false
 
     def start_game(game_key)
+      @mutex.synchronize { enforce_backoff! }
       @process.start_game(game_key)
       @mutex.synchronize { @health = :loading unless @process.running? && @health == :ready }
       self
+    rescue ProcessAgent::Error => error
+      record_failure(error) unless error.code == :restart_backoff
+      raise
     end
 
     def decide(request)
-      validate_topology!(request)
+      validate_request!(request)
       timeout = @mutex.synchronize do
         enforce_backoff!
         @health == :ready && @process.running? ? @warm_timeout : @cold_timeout
@@ -69,6 +73,11 @@ module UnobotV2
     rescue StandardError => error
       record_failure(error)
       raise
+    end
+
+    def validate_request!(request)
+      validate_topology!(request)
+      true
     end
 
     def end_game(game_key = nil, reason: 'game_end')

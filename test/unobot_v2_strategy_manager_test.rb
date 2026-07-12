@@ -36,6 +36,31 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     def shutdown = @shutdown_count += 1
   end
 
+  class ValidatingPersistentStrategy < RecordingStrategy
+    attr_reader :starts
+
+    def initialize
+      super
+      @starts = 0
+      @fail_start = false
+    end
+
+    def lifecycle = :persistent
+
+    def validate_request!(request)
+      raise UnobotV2::ProcessAgent::Error.new(:unsupported_topology, 'two players only') unless request.other_players.one?
+    end
+
+    def start_game(key)
+      @starts += 1
+      raise UnobotV2::ProcessAgent::Error.new(:restart_backoff, 'backed off') if @fail_start
+
+      super
+    end
+
+    def fail_start! = @fail_start = true
+  end
+
   def machine_request(game: 'g1', transport: 'machine', generation: 1,
                       playable: [], actions: ['draw'])
     metadata = { decision_id: "d-#{game}-#{generation}", channel: '#uno', transport: transport }
@@ -94,6 +119,49 @@ class UnobotV2StrategyManagerTest < Minitest::Test
     assert_match(/at most 1 active game/, error.message)
     assert_equal 1, created.length
     assert_equal ['machine:#uno:one'], manager.active_game_keys
+  ensure
+    manager&.shutdown
+  end
+
+  def test_preflight_rejects_unsupported_topology_without_occupying_neural_slot
+    strategy = ValidatingPersistentStrategy.new
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', limits: { neural: 1 }, factories: { neural: -> { strategy } }
+    )
+    unsupported = machine_request(game: 'unsupported')
+    unsupported = UnobotV2::Canonical::DecisionRequest.new(
+      **unsupported.state_h,
+      other_players: [{ id: 'one', card_count: 2 }, { id: 'two', card_count: 2 }],
+      metadata: unsupported.metadata
+    )
+
+    error = assert_raises(UnobotV2::ProcessAgent::Error) { manager.decide(unsupported) }
+    assert_equal :unsupported_topology, error.code
+    assert_empty manager.active_game_keys
+    assert_equal 0, strategy.starts
+    assert_equal 'draw', manager.decide(machine_request(game: 'valid')).action
+    assert_equal 1, strategy.starts
+  ensure
+    manager&.shutdown
+  end
+
+  def test_failed_persistent_start_is_retained_with_its_backoff_state
+    strategy = ValidatingPersistentStrategy.new
+    strategy.fail_start!
+    created = 0
+    manager = UnobotV2::StrategyManager.new(
+      selected: 'neural', factories: { neural: -> { created += 1; strategy } }
+    )
+
+    2.times do
+      error = assert_raises(UnobotV2::ProcessAgent::Error) do
+        manager.decide(machine_request(game: 'start-failure'))
+      end
+      assert_equal :restart_backoff, error.code
+      assert_empty manager.active_game_keys
+    end
+    assert_equal 1, created
+    assert_equal 2, strategy.starts
   ensure
     manager&.shutdown
   end

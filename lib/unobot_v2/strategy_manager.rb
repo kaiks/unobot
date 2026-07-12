@@ -46,7 +46,7 @@ module UnobotV2
 
     def decide(request)
       key, scope = identity_for(request)
-      session = activate(key, scope)
+      session = activate(key, scope, request)
       action = session.strategy.decide(request)
       ActionValidator.validate(action, request: request)
     rescue StandardError => error
@@ -157,7 +157,7 @@ module UnobotV2
 
     private
 
-    def activate(key, scope)
+    def activate(key, scope, request)
       replaced = nil
       started = false
       session = @mutex.synchronize do
@@ -186,9 +186,10 @@ module UnobotV2
         # Start is bounded and serialized with publication. game_end/cancel can
         # interrupt a later blocked #decide, but can never start an orphan.
         begin
+          strategy.validate_request!(request) if strategy.respond_to?(:validate_request!)
           strategy.start_game(key) if strategy.respond_to?(:start_game)
         rescue StandardError
-          discard_locked(strategy)
+          failed_start_locked(name, strategy)
           raise
         end
         @sessions[key] = created
@@ -262,6 +263,14 @@ module UnobotV2
       strategy.shutdown if strategy.respond_to?(:shutdown)
     rescue StandardError
       nil
+    end
+
+    def failed_start_locked(name, strategy)
+      if strategy.respond_to?(:lifecycle) && strategy.lifecycle == :persistent
+        @idle[name] << strategy unless @idle[name].include?(strategy)
+      else
+        discard_locked(strategy)
+      end
     end
 
     def identity_for(request)
