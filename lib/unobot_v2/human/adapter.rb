@@ -37,6 +37,11 @@ module UnobotV2
         request = reduction.request
         if request
           request = @encoder.mask_request(request)
+          if request.available_actions.empty?
+            @last_error = :no_encodable_action
+            resync!('no_encodable_action')
+            return Reduction.new(changed: true, reason: 'no_encodable_action')
+          end
           reduction = Reduction.new(
             request: request, commands: reduction.commands,
             changed: reduction.changed, reason: reduction.reason

@@ -88,6 +88,12 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     end
   end
 
+  class RejectAllEncoder < UnobotV2::Human::ActionEncoder
+    def encode(_action, request:)
+      Result.new(code: :unsupported, message: "fixture cannot encode for #{request.your_id}")
+    end
+  end
+
   HOST = 'ZbojeiJureq'
   CHANNEL = '#uno-test'
   GREEN_3 = "\x033[3]"
@@ -173,6 +179,27 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal %w[play draw], reduction.request.available_actions
     assert_equal true, reduction.request.metadata[:human_action_masked]
     assert_equal ['r5'], reduction.request.metadata[:human_masked_cards]
+  end
+
+  def test_human_adapter_resynchronizes_without_invoking_strategy_when_mask_is_empty
+    sent = []
+    requests = []
+    adapter = UnobotV2::Human::Adapter.new(
+      channel: CHANNEL, own_nick: 'Alice', host_nicks: [HOST],
+      transport: ->(channel, command) { sent << [channel, command] },
+      encoder: RejectAllEncoder.new, on_request: ->(request) { requests << request }
+    )
+    adapter.receive(event(status(players: 'Alice:1,Bob:2'), private: true, recipient: 'Alice'))
+    adapter.receive(event('UNO_STATUS_PRIVATE_V1 picked_card=-', private: true, recipient: 'Alice'))
+    reduction = adapter.receive(event(RED_5, private: true, recipient: 'Alice'))
+
+    assert_empty requests
+    assert_nil reduction.request
+    assert_equal 'no_encodable_action', reduction.reason
+    assert_equal :no_encodable_action, adapter.last_error
+    assert_includes sent, [CHANNEL, 'us']
+    assert_includes sent, [CHANNEL, 'ca']
+    refute adapter.reducer.safe?
   end
 
   def test_post_draw_only_picked_card_then_pass
