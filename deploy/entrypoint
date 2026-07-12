@@ -31,8 +31,12 @@ terminate() {
 }
 trap terminate INT TERM
 
-"$@" &
+# POSIX shells may attach /dev/null to an asynchronous command's standard input.
+# Preserve the caller's descriptor explicitly for JSON-lines process agents.
+exec 3<&0
+"$@" <&3 3<&- &
 child=$!
+exec 3<&-
 set +e
 wait "$child"
 status=$?

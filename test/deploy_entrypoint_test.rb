@@ -42,14 +42,29 @@ class DeployEntrypointTest < Minitest::Test
     assert_equal 78, status.exitstatus
   end
 
+  def test_supervised_child_retains_piped_standard_input
+    stdout, stderr, status = Open3.capture3(
+      clean_environment,
+      ENTRYPOINT, RbConfig.ruby, '-e', 'STDOUT.write(STDIN.read)',
+      stdin_data: "one\ntwo\n", chdir: ROOT
+    )
+
+    assert status.success?, stderr
+    assert_equal "one\ntwo\n", stdout
+  end
+
   private
 
   def run_entrypoint(environment)
     _stdout, _stderr, status = Open3.capture3(
-      { 'UNO_STRATEGY' => nil, 'UNO_SHADOW_STRATEGY' => nil,
-        'UNO_NEURAL_CHECKPOINT' => nil, 'UNO_NEURAL_CHECKPOINT_SHA256' => nil }.merge(environment),
+      clean_environment.merge(environment),
       ENTRYPOINT, 'true', chdir: ROOT
     )
     status
+  end
+
+  def clean_environment
+    { 'UNO_STRATEGY' => nil, 'UNO_SHADOW_STRATEGY' => nil,
+      'UNO_NEURAL_CHECKPOINT' => nil, 'UNO_NEURAL_CHECKPOINT_SHA256' => nil }
   end
 end
