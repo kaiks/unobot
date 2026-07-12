@@ -1,0 +1,9 @@
+source 'https://rubygems.org'
+
+gem 'base64'
+gem 'cinch', git: 'https://github.com/blolol/cinch.git'
+gem 'jedna', path: '../../../jedna'
+gem 'logger'
+gem 'ostruct'
+gem 'sequel'
+gem 'sqlite3'

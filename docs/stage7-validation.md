@@ -1,0 +1,97 @@
+# Stage 7 local IRC and differential validation
+
+This validation runs without an external network after its bundle and Python
+dependencies are installed. It starts a second ngIRCd on an allocated high
+port and does not touch the ordinary daemon on port 6667. Child processes have
+separate process groups and are stopped in this order: unobot, host, ngIRCd,
+with bounded TERM/KILL/reap cleanup.
+
+The topology is the real `UnoPlugin` (and only that host plugin), the real v2
+`CinchBridge`, a selected tournament strategy, and a raw IRC client acting as
+the one human opponent. The harness uses a temporary copy of `uno.db`, casual
+games, a default-deny machine allowlist containing only `unobot`, and seed
+7331 by default. It never copies or commits the neural checkpoint.
+
+## Setup and commands
+
+```bash
+cd /home/karol/projects/unobot
+BUNDLE_GEMFILE=test/e2e/Gemfile bundle install
+
+# Simple live, no model required
+BUNDLE_GEMFILE=test/e2e/Gemfile \
+  UNO_STAGE7_ARTIFACT_DIR=/tmp/uno-stage7-simple \
+  bundle exec ruby test/e2e/run_local_irc.rb
+
+# Required rollout gate: Simple acts, the 17.5M policy only observes
+BUNDLE_GEMFILE=test/e2e/Gemfile \
+  UNO_STRATEGY=simple UNO_SHADOW_STRATEGY=neural \
+  UNO_STAGE7_ARTIFACT_DIR=/tmp/uno-stage7-shadow \
+  bundle exec ruby test/e2e/run_local_irc.rb
+
+# Only after the shadow run passes: bounded neural-live two-player game
+BUNDLE_GEMFILE=test/e2e/Gemfile \
+  UNO_STRATEGY=neural UNO_SHADOW_STRATEGY=none \
+  UNO_STAGE7_ARTIFACT_DIR=/tmp/uno-stage7-neural \
+  bundle exec ruby test/e2e/run_local_irc.rb
+
+# Exercise the real `.uno reload` handler during a live game
+BUNDLE_GEMFILE=test/e2e/Gemfile UNO_STAGE7_RELOAD_AT=3 \
+  bundle exec ruby test/e2e/run_local_irc.rb
+```
+
+Override `UNO_STAGE7_HOST_ROOT`, `UNO_STAGE7_JEDNA_ROOT`,
+`UNO_STAGE7_SEED`, or `UNO_STAGE7_TIMEOUT` when the sibling checkout layout or
+timeout differs. The isolated integration Gemfile deliberately uses the local
+Jedna path: the host production lock references accepted SHA `17ada20`, which
+must exist remotely before an ordinary clean host bundle can resolve it.
+
+At every machine decision the runner asks the same host connection for `us`
+and `ca`, reduces those actual host replies through `Human::Reducer`, and
+compares its complete `state_h` with the decoded machine request. That machine
+request contains the host's authoritative `GameStateSerializer` result, so a
+passing `differential` record proves all three states agree. The chosen machine
+action is also dry-run through `Human::ActionEncoder`; only the machine ACTION
+is submitted. `decisions.jsonl` records comparisons, actions, encodability,
+shadow validity/agreement/latency, and failures. `processes.log` retains the
+actual IRC transcript and child diagnostics. Checkpoint/model output remains
+external.
+
+## Deterministic and fault coverage
+
+Run the local deterministic integration and maintained transport/lifecycle
+suites with:
+
+```bash
+ruby -Itest test/stage7_engine_differential_test.rb
+ruby -Itest test/unobot_v2_test.rb
+ruby -Itest test/unobot_v2_machine_test.rb
+ruby -Itest test/unobot_v2_cinch_bridge_test.rb
+ruby -Itest test/unobot_v2_process_agent_test.rb
+ruby -Itest test/unobot_v2_strategy_manager_test.rb
+ruby -Itest test/unobot_v2_shadow_strategy_test.rb
+ruby -Itest test/unobot_v2_neural_agent_test.rb
+```
+
+Together these cover:
+
+- engine-generated single/double reverse parity through the actual host chunk
+  codec, shuffled chunk reassembly, and the human reducer;
+- draw, playable/unplayable post-draw state and pass; +2/WD4 wars and penalty
+  stacks; reverse/skip; wild colors; ordinary/WD4 doubles;
+- stale and duplicate decisions/actions, duplicate/conflicting/shuffled/dropped
+  chunks, incomplete-frame expiry, dropped ACK recovery, and no replay;
+- duplicate/dropped/malformed human draw/effect/turn/private messages and
+  authoritative `us`/`ca` recovery;
+- disconnect/reconnect, own and host nick changes, PART/QUIT/KICK, multiple
+  machine channels and isolated per-game strategy processes;
+- plugin unload terminal events and `.uno reload`; strategy startup failure,
+  saturated stdin, timeout, process crash/EOF, restart/backoff, cancellation,
+  queue overflow, and clean process-group shutdown/reaping.
+
+The complete local IRC game additionally exercises actual network chunking,
+registration/autojoin, status resynchronization, ACK-before-next-state ordering,
+and clean shutdown. Randomly dealt live games cannot guarantee every rare card
+combination in one seed, so guaranteed effect/war/double cases remain in the
+deterministic suites while the live artifact records the combinations actually
+encountered.
