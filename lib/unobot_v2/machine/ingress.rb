@@ -277,7 +277,7 @@ module UnobotV2
       end
 
       def cleanup_routes
-        @game_sessions.delete_if { |_game_id, adapter| adapter.game_id.nil? }
+        @game_sessions.delete_if { |game_id, adapter| adapter.game_id != game_id }
       end
 
       def configure_tokens

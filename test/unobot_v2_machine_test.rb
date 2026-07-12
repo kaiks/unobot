@@ -822,6 +822,31 @@ class UnobotV2MachineIngressTest < Minitest::Test
     ingress.stop
   end
 
+  def test_reregistration_to_new_game_removes_old_game_route
+    uno = adapter('#uno')
+    ingress = UnobotV2::Machine::Ingress.new(
+      adapters: { '#uno' => uno }, own_nick: 'Alice', host_nicks: ['Host'],
+      on_error: ->(error) { @errors << error }
+    ).start
+    @sent.pop
+    ingress.enqueue(notice(@fixture.fetch('registered_line')))
+    wait_until { uno.game_id == 'gameFixture1' }
+    ingress.execute(invalidate: true) { uno.register! }
+    @sent.pop
+    second = @fixture.fetch('registered_line').sub('game=gameFixture1', 'game=gameFixture2')
+    ingress.enqueue(notice(second))
+    wait_until { uno.game_id == 'gameFixture2' }
+    ingress.synchronize
+    routes = ingress.instance_variable_get(:@game_sessions)
+    assert_equal ['gameFixture2'], routes.keys
+
+    ingress.enqueue(notice(@fixture.fetch('state_lines').first))
+    ingress.synchronize
+    assert_equal :unroutable_frame, @errors.pop.code
+    assert_empty uno.frame_buffer.frames
+    ingress.stop
+  end
+
   def test_error_and_status_callback_exceptions_do_not_kill_ordered_ingress
     uno = adapter('#uno', on_status: ->(_status) { raise 'status callback boom' })
     ingress = UnobotV2::Machine::Ingress.new(
