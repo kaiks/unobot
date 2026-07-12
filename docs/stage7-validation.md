@@ -112,3 +112,15 @@ engine state; the live runner deliberately submits only the machine action.
 Randomly dealt live games cannot guarantee every rare card combination in one
 seed, so guaranteed effect/war/double cases remain in the deterministic suites
 while the live artifact records the combinations actually encountered.
+
+## Stage 8 operational follow-up
+
+While shadow mode is enabled, `ShadowStrategy` retains one epoch-map entry for
+each distinct game scope for the wrapper's lifetime. Terminal-control cleanup
+was deliberately deferred: deleting an epoch can race a fresh same-scope
+reconnect decision and incorrectly invalidate it. Growth is linear and limited
+to shadow mode; a representative 10,000-scope map and its keys measured about
+1.20 MiB on the current Ruby (roughly 126 bytes per scope, with allocator
+variance), and wrapper reclamation releases it. A future cleanup must use
+stronger generation ownership and cover same-scope reconnect plus
+cross-channel prefix races before reclaiming quiescent generations.
