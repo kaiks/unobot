@@ -171,11 +171,11 @@ module UnobotV2
     private
 
     def validate_topology!(request)
-      return if request.other_players.length == 1
+      return if (1..9).cover?(request.other_players.length)
 
       raise ProcessAgent::Error.new(
         :unsupported_topology,
-        'neural strategy supports exactly one opponent (one human plus this bot)'
+        'neural strategy supports 2-10 total players'
       )
     end
 

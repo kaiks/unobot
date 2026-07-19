@@ -19,7 +19,7 @@ services:
     volumes:
       - type: bind
         source: ${UNO_CHECKPOINT:?set UNO_CHECKPOINT to an absolute checkpoint path}
-        target: /models/checkpoint_17500000_steps.zip
+        target: /models/jedna_multiplayer_v3.zip
         read_only: true
         bind:
           create_host_path: false
@@ -43,7 +43,7 @@ services:
       UNO_CHANNELS: ${UNO_CHANNELS:?set UNO_CHANNELS}
       UNO_HOST_NICKS: ${UNO_HOST_NICKS:?set UNO_HOST_NICKS}
       UNO_ADMIN_NICKS: ${UNO_ADMIN_NICKS:?set UNO_ADMIN_NICKS}
-      UNO_NEURAL_CHECKPOINT_SHA256: ${UNO_NEURAL_CHECKPOINT_SHA256:-3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f}
+      UNO_NEURAL_CHECKPOINT_SHA256: ${UNO_NEURAL_CHECKPOINT_SHA256:-0b1d3a62605a2a4834cd758f0038d33140bd91087a28d99b3c84a959e601340f}
       UNO_NEURAL_STOCHASTIC: ${UNO_NEURAL_STOCHASTIC:-false}
       UNO_OPERATIONS_SOCKET: /run/unobot/control.sock
       OMP_NUM_THREADS: ${UNO_TORCH_THREADS:-1}

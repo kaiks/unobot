@@ -42,7 +42,7 @@ start_container() {
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
     --tmpfs /run/unobot:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=10001,gid=10001 \
     --tmpfs /unobot/logs:rw,nosuid,nodev,size=16m,uid=10001,gid=10001 \
-    --mount "type=bind,source=$checkpoint,target=/models/checkpoint_17500000_steps.zip,readonly" \
+    --mount "type=bind,source=$checkpoint,target=/models/jedna_multiplayer_v3.zip,readonly" \
     -e IRC_SERVER=127.0.0.1 -e IRC_PORT=26669 \
     -e UNO_RUNTIME=v2 -e UNO_MESSAGING=machine -e UNO_STRATEGY=neural \
     -e UNO_SHADOW_STRATEGY=none -e UNO_CHANNELS='#startup-signal' \

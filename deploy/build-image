@@ -3,10 +3,11 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 jedna_root=${JEDNA_ROOT:-"$root/../jedna"}
-accepted_jedna_ref=17ada2012112abf1df2cd2a31342fcad2f3ed18a
-jedna_ref_input=${JEDNA_REF:-$accepted_jedna_ref}
+: "${JEDNA_REF:?set JEDNA_REF to the reviewed multiplayer-v3 Jedna commit}"
+: "${UNO_ACCEPTED_JEDNA_REF:?set UNO_ACCEPTED_JEDNA_REF to the same reviewed commit}"
+jedna_ref_input=$JEDNA_REF
 unobot_ref_input=${UNOBOT_REF:-HEAD}
-image=${UNO_IMAGE:-unobot-neural:17.5m}
+image=${UNO_IMAGE:-unobot-neural:multiplayer-v3}
 
 if ! jedna_ref=$(git -C "$jedna_root" rev-parse "$jedna_ref_input^{commit}" 2>/dev/null); then
   echo "Jedna commit $jedna_ref_input is unavailable; fetch it or set JEDNA_ROOT" >&2
@@ -16,8 +17,12 @@ if ! unobot_ref=$(git -C "$root" rev-parse "$unobot_ref_input^{commit}" 2>/dev/n
   echo "unobot commit $unobot_ref_input is unavailable" >&2
   exit 2
 fi
-if [ "$jedna_ref" != "$accepted_jedna_ref" ] && [ "${UNO_ALLOW_UNACCEPTED_JEDNA_REF:-false}" != true ]; then
-  echo "refusing nonaccepted Jedna revision; set UNO_ALLOW_UNACCEPTED_JEDNA_REF=true explicitly" >&2
+if ! accepted_jedna_ref=$(git -C "$jedna_root" rev-parse "$UNO_ACCEPTED_JEDNA_REF^{commit}" 2>/dev/null); then
+  echo "accepted Jedna commit $UNO_ACCEPTED_JEDNA_REF is unavailable" >&2
+  exit 2
+fi
+if [ "$jedna_ref" != "$accepted_jedna_ref" ]; then
+  echo "refusing Jedna revision that differs from UNO_ACCEPTED_JEDNA_REF" >&2
   exit 2
 fi
 

@@ -3,10 +3,11 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 image=${UNO_IMAGE:?set UNO_IMAGE to the built image tag or immutable ID}
-checkpoint=${UNO_CHECKPOINT:?set UNO_CHECKPOINT to checkpoint_17500000_steps.zip}
-expected=${UNO_NEURAL_CHECKPOINT_SHA256:-3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f}
+checkpoint=${UNO_CHECKPOINT:?set UNO_CHECKPOINT to jedna_multiplayer_v3.zip}
+expected=${UNO_NEURAL_CHECKPOINT_SHA256:-0b1d3a62605a2a4834cd758f0038d33140bd91087a28d99b3c84a959e601340f}
 unobot_ref=$(git -C "$root" rev-parse "${UNOBOT_REF:-HEAD}^{commit}")
-jedna_ref=$(git -C "${JEDNA_ROOT:-$root/../jedna}" rev-parse "${JEDNA_REF:-17ada2012112abf1df2cd2a31342fcad2f3ed18a}^{commit}")
+: "${JEDNA_REF:?set JEDNA_REF to the reviewed multiplayer-v3 Jedna commit}"
+jedna_ref=$(git -C "${JEDNA_ROOT:-$root/../jedna}" rev-parse "$JEDNA_REF^{commit}")
 
 case "$checkpoint" in /*) ;; *) echo 'UNO_CHECKPOINT must be an absolute path' >&2; exit 2 ;; esac
 
@@ -22,15 +23,24 @@ docker run --rm --platform linux/amd64 --read-only \
   /bin/sh -c "ruby -e \"abort unless RUBY_VERSION == '3.4.4'\" && python3 -c \"import sys; assert sys.version_info[:3] == (3,11,2)\" && /opt/venv/bin/python -c \"import gymnasium,numpy,sb3_contrib,stable_baselines3,torch; assert torch.__version__ == '2.8.0+cpu'; assert stable_baselines3.__version__ == sb3_contrib.__version__ == '2.7.0'; assert gymnasium.__version__ == '1.2.0'; assert numpy.__version__ == '2.3.5'\""
 
 docker run --rm --platform linux/amd64 "$image" /bin/sh -c \
-  'test "$(id -u)" = 10001 && test ! -e /models/checkpoint_17500000_steps.zip && test ! -d /unobot/.git && test ! -d /unobot/test && test ! -e /opt/jedna-tournaments/examples/rl_agent/train_sb3.py'
+  'test "$(id -u)" = 10001 && test ! -e /models/jedna_multiplayer_v3.zip && test ! -d /unobot/.git && test ! -d /unobot/test && test ! -e /opt/jedna-tournaments/examples/rl_agent/train_sb3.py'
 
-request='{"type":"request_action","state":{"your_id":"bot","hand":["r5"],"top_card":"b7","game_state":"normal","stacked_cards":0,"already_picked":false,"picked_card":null,"other_players":[{"id":"human","card_count":7}],"available_actions":["draw"],"playable_cards":[]}}'
-responses=$(printf '%s\n%s\n%s\n' "$request" "$request" "$request" | \
+requests=$(ruby -rjson -e '
+  (2..10).each do |players|
+    others = (2..players).map { |index| { id: "player#{index}", card_count: index } }
+    puts JSON.generate(type: "request_action", state: {
+      your_id: "bot", hand: ["r5"], top_card: "b7", game_state: "normal",
+      stacked_cards: 0, already_picked: false, picked_card: nil,
+      other_players: others, available_actions: ["draw"], playable_cards: []
+    })
+  end
+')
+responses=$(printf '%s\n' "$requests" | \
   docker run --rm -i --platform linux/amd64 --read-only --memory=1g --pids-limit=128 \
-    --mount "type=bind,source=$checkpoint,target=/models/checkpoint_17500000_steps.zip,readonly" \
+    --mount "type=bind,source=$checkpoint,target=/models/jedna_multiplayer_v3.zip,readonly" \
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
     -e UNO_STRATEGY=Neural "$image" \
-    /bin/sh -c 'cd /opt/jedna-tournaments/examples && exec /opt/venv/bin/python -m rl_agent.sb3_opponent --model /models/checkpoint_17500000_steps.zip')
+    /bin/sh -c 'cd /opt/jedna-tournaments/examples && exec /opt/venv/bin/python -m rl_agent.sb3_opponent --model /models/jedna_multiplayer_v3.zip')
 
-printf '%s\n' "$responses" | ruby -rjson -e 'lines = STDIN.readlines(chomp: true); abort unless lines.length == 3; abort unless lines.map { |line| JSON.parse(line) }.all? { |action| action == { "action" => "draw" } }'
+printf '%s\n' "$responses" | ruby -rjson -e 'lines = STDIN.readlines(chomp: true); abort unless lines.length == 9; abort unless lines.map { |line| JSON.parse(line) }.all? { |action| action == { "action" => "draw" } }'
 printf '%s\n' "$responses"

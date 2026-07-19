@@ -1,7 +1,7 @@
 # Neural IRC deployment and rollout
 
-This runbook deploys the IRC-facing `uno` bot with Jedna's deterministic 17.5M
-MaskablePPO strategy. It does not authorize a public deployment. Complete each
+This runbook deploys the IRC-facing `uno` bot with Jedna's deterministic
+multiplayer v3 MaskablePPO strategy. It does not authorize a public deployment. Complete each
 gate, retain its artifacts, and stop on the stated criteria.
 
 ## Architecture and provenance
@@ -16,19 +16,14 @@ isolating any state that the accepted strategy interface shares.
 The image contains no checkpoint and no copied agent implementation from this
 repository. `deploy/build-image` archives an explicit unobot commit
 (`UNOBOT_REF`, clean `HEAD` by default), rather than sending the mutable
-worktree. It requires the accepted Jedna commit
-`17ada2012112abf1df2cd2a31342fcad2f3ed18a` and creates a separate named context
+worktree. It requires `JEDNA_REF` and an identical explicitly reviewed
+`UNO_ACCEPTED_JEDNA_REF`, then creates a separate named context
 containing exactly the six files needed by Simple, Crushing, and neural
 inference plus Jedna's license. Training code, repository metadata, dirty
 working-tree files, and the checkpoint never enter either BuildKit context.
-The image labels record both exact revisions. A nonaccepted `JEDNA_REF` is
-refused unless `UNO_ALLOW_UNACCEPTED_JEDNA_REF=true` explicitly acknowledges
-that unsupported provenance.
-
-That accepted Jedna SHA is not on the current public `origin/main` as of this
-handoff. A builder needs a local checkout containing the object, or the commit
-must be published/fetched first. This deployment does not solve that external
-prerequisite. Do not substitute the remote tip.
+The image labels record both exact revisions. Any mismatch between the selected
+and explicitly accepted Jedna commit is refused. The reviewed commit must
+contain the multiplayer-v3 encoder used to train the mounted checkpoint.
 
 Jedna is PolyForm Noncommercial 1.0.0; the image includes
 `/opt/jedna-tournaments/JEDNA-LICENSE`. Confirm the intended use is permitted.
@@ -61,25 +56,27 @@ Build and smoke-test the actual checkpoint:
 
 ```bash
 export JEDNA_ROOT=/absolute/path/to/jedna
-export UNO_IMAGE=unobot-neural:17.5m
-export UNO_CHECKPOINT="$JEDNA_ROOT/extension-gems/jedna-tournaments/checkpoints/overnight-dagger/checkpoint_17500000_steps.zip"
+export JEDNA_REF=<reviewed-multiplayer-v3-commit>
+export UNO_ACCEPTED_JEDNA_REF=$JEDNA_REF
+export UNO_IMAGE=unobot-neural:multiplayer-v3
+export UNO_CHECKPOINT="$JEDNA_ROOT/extension-gems/jedna-tournaments/models/jedna_multiplayer_v3.zip"
 
 deploy/build-image
 deploy/verify-image
 deploy/verify-startup-signals
 
 # Compose accepts only an immutable local image ID or registry RepoDigest.
-export UNO_IMAGE=$(docker image inspect unobot-neural:17.5m --format '{{.Id}}')
+export UNO_IMAGE=$(docker image inspect unobot-neural:multiplayer-v3 --format '{{.Id}}')
 ```
 
-The expected model is 3,225,534 bytes with SHA-256
-`3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f`.
+The expected model is 3,359,227 bytes with SHA-256
+`0b1d3a62605a2a4834cd758f0038d33140bd91087a28d99b3c84a959e601340f`.
 `deploy/entrypoint` verifies readability and this checksum before Ruby starts,
 so a bad mount fails before model load or IRC connection. Override
 `UNO_NEURAL_CHECKPOINT_SHA256` only for an explicitly reviewed replacement.
 `verify-image` confirms the exact versions, non-root identity, absence of
-repository/training/model content, real model load, and three deterministic
-warm decisions.
+repository/training/model content, real model load, and nine deterministic
+warm decisions covering every table size from 2 through 10 players.
 
 ## Runtime configuration and isolation
 
@@ -197,9 +194,10 @@ clean shutdown result. Never advance with unexplained errors.
    Set `UNO_STRATEGY=neural`, `UNO_SHADOW_STRATEGY=none`, still no autojoin.
    Complete several bounded games with zero invalid/stale/replayed actions and
    stable warm latency/memory.
-3. **One human plus one neural.** This is the only supported neural topology.
-   Confirm the opponent is human administratively; canonical state can count
-   one opponent but cannot classify it. Refuse a second channel/game.
+3. **Multiplayer topology.** Start with one human plus the neural player, then
+   exercise 3-10 total players. At every decision require the canonical state
+   to contain every opponent ID and exact public hand size in current turn
+   order. The single active neural game limit remains in force across channels.
 4. **Machine protocol gate.** Use authoritative machine messaging, validate
    registration/action correlation and reconnect/nick-change recovery. Do not
    enable human fallback until this passes.

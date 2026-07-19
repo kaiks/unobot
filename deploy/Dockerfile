@@ -3,7 +3,7 @@
 ARG RUBY_IMAGE=quay.io/evl.ms/fullstaq-ruby@sha256:fce5b291c13720c64f89e753f1833705bf9c5ac78b060ec87753b0d3ef1f88f9
 FROM ${RUBY_IMAGE}
 
-ARG JEDNA_REF=17ada2012112abf1df2cd2a31342fcad2f3ed18a
+ARG JEDNA_REF
 ARG UNOBOT_REF
 ARG PYTHON_VERSION=3.11.2-1+b1
 ARG TINI_VERSION=0.19.0-1+b3
@@ -77,7 +77,7 @@ RUN groupadd --gid 10001 unobot && \
     chmod 0755 deploy/entrypoint bin/unobotctl && \
     find /opt/jedna-tournaments -type d -exec chmod 0555 {} + && \
     find /opt/jedna-tournaments -type f -exec chmod 0444 {} + && \
-    test ! -e /models/checkpoint_17500000_steps.zip && \
+    test ! -e /models/jedna_multiplayer_v3.zip && \
     ruby --version | grep -F 'ruby 3.4.4' && \
     python3 --version | grep -F 'Python 3.11.2'
 
@@ -85,7 +85,7 @@ USER 10001:10001
 
 ENV UNO_TOURNAMENT_EXAMPLES=/opt/jedna-tournaments/examples \
     UNO_NEURAL_PYTHON=/opt/venv/bin/python \
-    UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip \
+    UNO_NEURAL_CHECKPOINT=/models/jedna_multiplayer_v3.zip \
     UNO_OPERATIONS_SOCKET=/run/unobot/control.sock
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/unobot/deploy/entrypoint"]

@@ -256,6 +256,15 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal 7, request.other_players.first.card_count
   end
 
+  def test_human_status_preserves_nine_ordered_opponent_counts
+    opponents = (2..10).map { |index| "Player#{index}:#{index}" }
+
+    request = synchronize(players: (["Alice:3"] + opponents).join(','))
+
+    assert_equal (2..10).map { |index| "Player#{index}" }, request.other_players.map(&:id)
+    assert_equal (2..10).to_a, request.other_players.map(&:card_count)
+  end
+
   def test_real_transcript_fixture_replays_in_scope_order
     fixture_path = File.expand_path('fixtures/human_protocol_v1/transcripts.json', __dir__)
     events = JSON.parse(File.read(fixture_path)).fetch('normal_start_draw_pass')

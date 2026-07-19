@@ -25,13 +25,13 @@ BUNDLE_GEMFILE=test/e2e/Gemfile \
   UNO_STAGE7_ARTIFACT_DIR=/tmp/uno-stage7-simple \
   bundle exec ruby test/e2e/run_local_irc.rb
 
-# Required rollout gate: Simple acts, the 17.5M policy only observes
+# Required rollout gate: Simple acts, the multiplayer v3 policy only observes
 BUNDLE_GEMFILE=test/e2e/Gemfile \
   UNO_STRATEGY=simple UNO_SHADOW_STRATEGY=neural \
   UNO_STAGE7_ARTIFACT_DIR=/tmp/uno-stage7-shadow \
   bundle exec ruby test/e2e/run_local_irc.rb
 
-# Only after the shadow run passes: bounded neural-live two-player game
+# Only after the shadow run passes: bounded neural-live game (start with two players)
 BUNDLE_GEMFILE=test/e2e/Gemfile \
   UNO_STRATEGY=neural UNO_SHADOW_STRATEGY=none \
   UNO_STAGE7_ARTIFACT_DIR=/tmp/uno-stage7-neural \

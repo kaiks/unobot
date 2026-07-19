@@ -53,9 +53,9 @@ UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=simple \
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing \
   bundle exec ruby uno_bot_starter.rb
 
-# Persistent deterministic 17.5M neural policy (one two-player game globally)
+# Persistent deterministic multiplayer v3 neural policy (one game globally)
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=neural \
-  UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip \
+  UNO_NEURAL_CHECKPOINT=/models/jedna_multiplayer_v3.zip \
   bundle exec ruby uno_bot_starter.rb
 ```
 
@@ -68,19 +68,22 @@ are trusted configuration but are executed directly, never through a shell.
 The neural strategy executes `python3 -m rl_agent.sb3_opponent` from the
 validated tournament examples directory and passes the checkpoint as an argv
 value. It is deterministic by default; `UNO_NEURAL_STOCHASTIC=true` is an
-explicit opt-in. See the v2 documentation for health deadlines, process reuse,
-and the initial two-player/single-process limit.
+explicit opt-in. The policy accepts canonical states for 2-10 players while
+retaining the one-model-process/one-active-game resource limit. See the v2
+documentation for health deadlines and process reuse.
 
 ### Docker Deployment
 
 ```bash
 # Build the pinned combined Ruby/Python inference image from an accepted Jedna checkout
 export JEDNA_ROOT=$(realpath ../jedna)
-export UNO_IMAGE=unobot-neural:17.5m
+export JEDNA_REF=<reviewed-multiplayer-v3-commit>
+export UNO_ACCEPTED_JEDNA_REF=$JEDNA_REF
+export UNO_IMAGE=unobot-neural:multiplayer-v3
 deploy/build-image
 
 # Configure the external read-only model and IRC allowlists, then start safely in shadow mode
-export UNO_CHECKPOINT=$(realpath "$JEDNA_ROOT/extension-gems/jedna-tournaments/checkpoints/overnight-dagger/checkpoint_17500000_steps.zip")
+export UNO_CHECKPOINT=$(realpath "$JEDNA_ROOT/extension-gems/jedna-tournaments/models/jedna_multiplayer_v3.zip")
 export UNO_IMAGE=$(docker image inspect "$UNO_IMAGE" --format '{{.Id}}')
 export IRC_SERVER=irc.example.test UNO_CHANNELS='#uno-test'
 export UNO_HOST_NICKS=ZbojeiJureq UNO_ADMIN_NICKS=operator

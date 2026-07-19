@@ -6,8 +6,8 @@ umask 077
 live_strategy=$(printf '%s' "${UNO_STRATEGY:-}" | tr '[:upper:]' '[:lower:]')
 shadow_strategy=$(printf '%s' "${UNO_SHADOW_STRATEGY:-}" | tr '[:upper:]' '[:lower:]')
 if [ "$live_strategy" = neural ] || [ "$shadow_strategy" = neural ]; then
-  checkpoint=${UNO_NEURAL_CHECKPOINT:-/models/checkpoint_17500000_steps.zip}
-  expected=${UNO_NEURAL_CHECKPOINT_SHA256:-3399184a589bce389377ca446f1dcb278cdf9123f5a3971031fbee24d5277b4f}
+  checkpoint=${UNO_NEURAL_CHECKPOINT:-/models/jedna_multiplayer_v3.zip}
+  expected=${UNO_NEURAL_CHECKPOINT_SHA256:-0b1d3a62605a2a4834cd758f0038d33140bd91087a28d99b3c84a959e601340f}
   if [ ! -r "$checkpoint" ]; then
     echo 'neural checkpoint is not readable' >&2
     exit 78

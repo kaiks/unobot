@@ -135,7 +135,7 @@ UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=simple bundle exec ruby uno_bot_
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=simple bundle exec ruby uno_bot_starter.rb
 UNO_RUNTIME=v2 UNO_MESSAGING=human UNO_STRATEGY=crushing bundle exec ruby uno_bot_starter.rb
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=crushing bundle exec ruby uno_bot_starter.rb
-UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=neural UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip bundle exec ruby uno_bot_starter.rb
+UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=neural UNO_NEURAL_CHECKPOINT=/models/jedna_multiplayer_v3.zip bundle exec ruby uno_bot_starter.rb
 ```
 
 V2 does not join newly announced games unless the operator explicitly sets
@@ -181,7 +181,7 @@ and `crushing` are also accepted for differential checks.
 ```bash
 UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=simple \
   UNO_SHADOW_STRATEGY=neural \
-  UNO_NEURAL_CHECKPOINT=/models/checkpoint_17500000_steps.zip \
+  UNO_NEURAL_CHECKPOINT=/models/jedna_multiplayer_v3.zip \
   bundle exec ruby uno_bot_starter.rb 2>shadow.jsonl
 ```
 
@@ -190,7 +190,7 @@ UNO_RUNTIME=v2 UNO_MESSAGING=machine UNO_STRATEGY=simple \
 interpolation. `UNO_TOURNAMENT_EXAMPLES` is a validated working directory and
 must contain `rl_agent/sb3_opponent.py`; `UNO_NEURAL_CHECKPOINT` must be a
 readable external file. In the sibling Jedna layout it defaults to
-`checkpoints/overnight-dagger/checkpoint_17500000_steps.zip`. Override the
+`models/jedna_multiplayer_v3.zip`. Override the
 executable with the single argv value `UNO_NEURAL_PYTHON` when needed. The
 model is never copied into or loaded from this repository.
 
@@ -200,7 +200,7 @@ request after process spawn, including model load; `UNO_NEURAL_WARM_TIMEOUT`
 defaults to 1 second. Spawning itself is bounded by
 `UNO_NEURAL_SPAWN_TIMEOUT` (5 seconds). The upstream module emits no ready
 marker, so after validating executable/module/checkpoint paths the selected
-neural manager sends one reserved, valid two-player canonical decision under
+neural manager sends one reserved, valid canonical decision under
 the cold deadline. Its action is validated and a game-end/reset is delivered
 before the IRC bridge is attached. The feed-forward module has no per-game
 memory and ignores that lifecycle frame, leaving the verified process warm and
@@ -219,13 +219,13 @@ dies while idle, its replacement is marked cold even though it is already alive
 by the time `start_game` returns, so model reload can never inherit the shorter
 warm deadline.
 
-The initial live release supports exactly this bot and one opponent. Because
-the canonical contract does not classify an opponent as human or automated,
-unobot enforces one `other_players` entry and the operator/host must ensure that
-opponent is human. The manager additionally permits only one active neural
-game across all channels, so it never allocates a second roughly 377 MiB model
-process. Unsupported topology is rejected before process spawn/session
-publication and cannot consume that global slot.
+The multiplayer v3 policy accepts one through nine ordered `other_players`
+entries, representing 2-10 total players. The human reducer and authoritative
+machine protocol both preserve each public player ID and hand size in current
+turn order. The manager still permits only one active neural game across all
+channels, so it never allocates a second roughly 377 MiB model process.
+Topologies outside 2-10 players are rejected before process/session use and
+cannot consume that global slot.
 
 Human messaging filters the canonical request through `ActionEncoder` before
 strategy inference. Any card/action variant the IRC grammar cannot express is
@@ -249,14 +249,14 @@ The external model smoke is opt-in:
 UNO_RUN_REAL_NEURAL_TESTS=1 ruby -Itest test/unobot_v2_neural_real_test.rb
 ```
 
-For the complete external two-player game smoke, use Jedna's maintained
+For a complete external game smoke, use Jedna's maintained
 runner (its agent-command interface is a test harness, not unobot's production
 spawn path):
 
 ```bash
 cd /path/to/jedna/extension-gems/jedna-tournaments/examples
 mise exec ruby@3.4.4 -- bundle exec ruby ./run_single_game.rb \
-  "python3 -m rl_agent.sb3_opponent --model ../checkpoints/overnight-dagger/checkpoint_17500000_steps.zip" \
+  "python3 -m rl_agent.sb3_opponent --model ../models/jedna_multiplayer_v3.zip" \
   "./simple_agent.rb"
 ```
 

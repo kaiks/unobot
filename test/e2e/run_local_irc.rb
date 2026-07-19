@@ -118,7 +118,7 @@ Dir.mktmpdir('uno-stage7-e2e') do |directory|
         'UNO_AUTOJOIN' => 'true',
         'UNO_TOURNAMENT_EXAMPLES' => File.join(JEDNA_ROOT, 'extension-gems/jedna-tournaments/examples'),
         'UNO_NEURAL_CHECKPOINT' => File.join(
-          JEDNA_ROOT, 'extension-gems/jedna-tournaments/checkpoints/overnight-dagger/checkpoint_17500000_steps.zip'
+          JEDNA_ROOT, 'extension-gems/jedna-tournaments/models/jedna_multiplayer_v3.zip'
         )
       ),
       RbConfig.ruby, File.join(__dir__, 'unobot_runner.rb'), ROOT, port.to_s, CHANNEL, artifact, log: log

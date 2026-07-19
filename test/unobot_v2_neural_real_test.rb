@@ -8,13 +8,13 @@ require_relative '../lib/unobot_v2'
 # repository dependencies. Run with UNO_RUN_REAL_NEURAL_TESTS=1.
 class UnobotV2NeuralRealTest < Minitest::Test
   DEFAULT_EXAMPLES = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/examples'
-  DEFAULT_CHECKPOINT = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/checkpoints/' \
-                       'overnight-dagger/checkpoint_17500000_steps.zip'
+  DEFAULT_CHECKPOINT = '/home/karol/projects/jedna/extension-gems/jedna-tournaments/models/' \
+                       'jedna_multiplayer_v3.zip'
 
   def setup
     skip 'set UNO_RUN_REAL_NEURAL_TESTS=1 for the external model smoke test' unless ENV['UNO_RUN_REAL_NEURAL_TESTS'] == '1'
     skip 'external Jedna examples are unavailable' unless File.file?(File.join(examples, 'rl_agent/sb3_opponent.py'))
-    skip 'external 17.5M checkpoint is unavailable' unless File.file?(checkpoint)
+    skip 'external multiplayer v3 checkpoint is unavailable' unless File.file?(checkpoint)
   end
 
   def test_real_checkpoint_cold_warm_and_game_reset_reuse
@@ -30,7 +30,7 @@ class UnobotV2NeuralRealTest < Minitest::Test
     )
     cold_health = monotonic - health_started
     agent = manager.instance_variable_get(:@idle).fetch('neural').last
-    request = two_player_request
+    request = multiplayer_request(players: 2)
     process = agent.instance_variable_get(:@process)
     pid = process.instance_variable_get(:@wait_thread).pid
     assert_equal :ready, agent.diagnostics[:health]
@@ -50,8 +50,16 @@ class UnobotV2NeuralRealTest < Minitest::Test
     assert_operator second_warm, :<, 2
     assert_equal :ready, agent.diagnostics[:health]
 
+    (2..10).each do |players|
+      table_request = multiplayer_request(
+        players: players, game: 'real', decision: "real-#{players}-decision"
+      )
+      action = manager.decide(table_request)
+      UnobotV2::ActionValidator.validate(action, request: table_request)
+    end
+
     assert_predicate manager.game_end('machine:#uno:real', reason: 'smoke_reset'), :success?
-    next_request = two_player_request(game: 'real-two')
+    next_request = multiplayer_request(players: 10, game: 'real-ten')
     assert manager.decide(next_request)
     assert_equal pid, process.instance_variable_get(:@wait_thread).pid
   ensure
@@ -63,14 +71,17 @@ class UnobotV2NeuralRealTest < Minitest::Test
   def examples = ENV.fetch('UNO_TOURNAMENT_EXAMPLES', DEFAULT_EXAMPLES)
   def checkpoint = ENV.fetch('UNO_NEURAL_CHECKPOINT', DEFAULT_CHECKPOINT)
 
-  def two_player_request(game: 'real')
+  def multiplayer_request(players:, game: 'real', decision: nil)
     envelope = JSON.parse(File.read(File.expand_path(
       'fixtures/jedna_protocol_v1/request_action_normal.json', __dir__
     )))
-    envelope.fetch('state')['other_players'] = [envelope.fetch('state').fetch('other_players').first]
+    envelope.fetch('state')['other_players'] = (2..players).map do |index|
+      { 'id' => "player#{index}", 'card_count' => index }
+    end
     UnobotV2::Canonical::DecisionRequest.from_protocol(
       envelope, metadata: {
-        channel: '#uno', transport: 'machine', game_id: game, decision_id: "#{game}-decision"
+        channel: '#uno', transport: 'machine', game_id: game,
+        decision_id: decision || "#{game}-decision"
       }
     )
   end

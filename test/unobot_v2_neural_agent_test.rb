@@ -224,12 +224,27 @@ class UnobotV2NeuralAgentTest < Minitest::Test
     assert_in_delta 2.0, agent.diagnostics[:retry_in_seconds], 0.001
   end
 
-  def test_only_two_player_topology_is_supported_without_poisoning_health
+  def test_every_two_to_ten_player_topology_is_supported
     agent = neural('persistent_valid')
-    error = assert_raises(UnobotV2::ProcessAgent::Error) { agent.decide(request(opponents: 2)) }
-    assert_equal :unsupported_topology, error.code
-    assert_equal 0, agent.diagnostics[:consecutive_failures]
-    assert agent.diagnostics[:running]
+
+    (1..9).each do |opponent_count|
+      assert_equal 'draw', agent.decide(request(opponents: opponent_count)).action
+    end
+
+    assert_equal :ready, agent.diagnostics[:health]
+  end
+
+  def test_out_of_range_topologies_are_rejected_without_poisoning_health
+    agent = neural('persistent_valid')
+
+    [0, 10].each do |opponent_count|
+      error = assert_raises(UnobotV2::ProcessAgent::Error) do
+        agent.decide(request(opponents: opponent_count))
+      end
+      assert_equal :unsupported_topology, error.code
+      assert_equal 0, agent.diagnostics[:consecutive_failures]
+      assert agent.diagnostics[:running]
+    end
   end
 
   def test_factory_uses_module_argv_deterministically_unless_opted_in

@@ -96,12 +96,12 @@ module UnobotV2
     def neural_checkpoint(env:, examples:)
       configured = env['UNO_NEURAL_CHECKPOINT']
       path = configured || File.expand_path(
-        '../checkpoints/overnight-dagger/checkpoint_17500000_steps.zip', examples
+        '../models/jedna_multiplayer_v3.zip', examples
       )
       expanded = File.expand_path(path)
       unless File.file?(expanded) && File.readable?(expanded)
         raise Configuration::Error,
-              'neural checkpoint is not a readable file; set UNO_NEURAL_CHECKPOINT to checkpoint_17500000_steps.zip'
+              'neural checkpoint is not a readable file; set UNO_NEURAL_CHECKPOINT to jedna_multiplayer_v3.zip'
       end
       expanded
     end
