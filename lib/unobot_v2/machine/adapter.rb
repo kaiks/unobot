@@ -399,7 +399,11 @@ module UnobotV2
 
         request = @active_request
         previous_game_id = @game_id
-        invalidate_session!(event.to_sym)
+        # A host-reported stopped game is terminal for that game, not for this
+        # adapter. Keep :stopped reserved for local shutdown/plugin unload so a
+        # later game can establish a fresh machine registration.
+        next_lifecycle = event == 'stopped' ? :game_stopped : event.to_sym
+        invalidate_session!(next_lifecycle)
         @lifecycle = :stopped if event == 'plugin_unloaded'
         status(:terminal_event, event: event, request: request,
                game_id: previous_game_id, channel: channel)

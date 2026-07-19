@@ -338,6 +338,21 @@ class UnobotV2MachineAdapterTest < Minitest::Test
     assert_equal '.uno machine register', @sent.last[1]
   end
 
+  def test_stopped_game_allows_registration_for_the_next_game
+    register
+
+    result = deliver_event('stopped')
+    assert_predicate result, :success?
+    assert_equal :stopped, result.event
+    assert_equal :game_stopped, @adapter.lifecycle
+    assert_nil @adapter.game_id
+
+    registration = @adapter.register!
+    assert_predicate registration, :success?
+    assert_equal :registering, @adapter.lifecycle
+    assert_equal ['#uno', '.uno machine register'], @sent.last.first(2)
+  end
+
   def test_delayed_transient_terminal_after_new_registration_registers_fresh_again
     register
     assert_predicate @adapter.register!, :success?
