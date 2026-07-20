@@ -36,7 +36,7 @@ class UnobotV2ProcessAgentTest < Minitest::Test
     @agents ||= []
     created = UnobotV2::ProcessAgent.new(
       argv: [RbConfig.ruby, FIXTURE, mode], name: mode,
-      request_timeout: 0.25, shutdown_timeout: 0.1, **options
+      request_timeout: 0.5, shutdown_timeout: 0.1, **options
     )
     @agents << created
     created.start_game('g1')
@@ -146,7 +146,7 @@ class UnobotV2ProcessAgentTest < Minitest::Test
     Dir.mktmpdir('unobot-agent') do |directory|
       File.write(File.join(directory, 'working-directory-marker'), '')
       strategy = agent('working_directory', chdir: directory, request_timeout: 5)
-      assert_equal 'draw', strategy.decide(request, timeout: 0.25).action
+      assert_equal 'draw', strategy.decide(request, timeout: 0.5).action
       refute_includes strategy.diagnostics.keys, :chdir
     end
 

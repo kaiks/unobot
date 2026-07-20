@@ -35,9 +35,9 @@ noncommercial.
 
 The deployment pins:
 
-- Fullstaq Ruby 3.4.4 bookworm image digest
-  `sha256:fce5b291c13720c64f89e753f1833705bf9c5ac78b060ec87753b0d3ef1f88f9`;
-- Bundler 2.3.7 and the committed `Gemfile.lock` (including Cinch `fad9b95`);
+- official Ruby 4.0.6 slim-bookworm linux/amd64 image digest
+  `sha256:654c8382a37d73dc8cb7dfe784d711ea82be6aafae2c8fee939149fd80a507c1`;
+- Bundler 4.0.16 and the committed `Gemfile.lock` (including Cinch `fad9b95`);
 - Debian Python 3.11.2, `tini` 0.19.0, and installation package versions;
 - Torch 2.8.0+cpu, Stable-Baselines3 2.7.0, sb3-contrib 2.7.0,
   Gymnasium 1.2.0, NumPy 2.3.5, and every resolved Python dependency in
@@ -47,8 +47,8 @@ The build is specifically `linux/amd64`: the base digest, Debian package
 versions, and Python wheel hashes do not claim another architecture. Debian
 APT metadata and downloaded Ruby gem bodies are still fetched from live
 repositories. The base, package versions, Gemfile lock, Cinch git revision,
-and resulting image ID are recorded, but Bundler 2.3.7 does not provide a
-complete content-hash lock for those Ruby downloads. Rebuilding therefore
+and resulting image ID are recorded, but the lock does not provide a complete
+content hash for those Ruby downloads. Rebuilding therefore
 requires trusted package/gem endpoints; retain and deploy the reviewed image
 ID or registry RepoDigest rather than treating a later rebuild as identical.
 
@@ -69,8 +69,15 @@ deploy/verify-startup-signals
 export UNO_IMAGE=$(docker image inspect unobot-neural:multiplayer-v3 --format '{{.Id}}')
 ```
 
-The expected model is 3,359,227 bytes with SHA-256
-`0b1d3a62605a2a4834cd758f0038d33140bd91087a28d99b3c84a959e601340f`.
+The expected model is the held-out 9.75M-step checkpoint selected on 2026-07-20:
+3,359,191 bytes with SHA-256
+`716e687a637632e286e0050b1e013ded46af95033bf5a45901163cc0c141aa15`.
+It is the best observed deterministic policy from the weighted Crusher run on
+the 2-4-player selection range; it was not statistically distinguishable from
+the adjacent 10M checkpoints. On an independent 12,000-game confirmation range
+it scored 38.91% macro against Crushing across equally weighted 2-, 3-, and
+4-player tables (aggregate Wilson 95% 38.04-39.78%). Jedna's `BOT_RESEARCH.md`
+records the complete training, selection, and confidence caveats.
 `deploy/entrypoint` verifies readability and this checksum before Ruby starts,
 so a bad mount fails before model load or IRC connection. Override
 `UNO_NEURAL_CHECKPOINT_SHA256` only for an explicitly reviewed replacement.

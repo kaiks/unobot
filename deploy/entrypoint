@@ -7,7 +7,7 @@ live_strategy=$(printf '%s' "${UNO_STRATEGY:-}" | tr '[:upper:]' '[:lower:]')
 shadow_strategy=$(printf '%s' "${UNO_SHADOW_STRATEGY:-}" | tr '[:upper:]' '[:lower:]')
 if [ "$live_strategy" = neural ] || [ "$shadow_strategy" = neural ]; then
   checkpoint=${UNO_NEURAL_CHECKPOINT:-/models/jedna_multiplayer_v3.zip}
-  expected=${UNO_NEURAL_CHECKPOINT_SHA256:-0b1d3a62605a2a4834cd758f0038d33140bd91087a28d99b3c84a959e601340f}
+  expected=${UNO_NEURAL_CHECKPOINT_SHA256:-716e687a637632e286e0050b1e013ded46af95033bf5a45901163cc0c141aa15}
   if [ ! -r "$checkpoint" ]; then
     echo 'neural checkpoint is not readable' >&2
     exit 78

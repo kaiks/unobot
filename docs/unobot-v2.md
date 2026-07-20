@@ -255,7 +255,7 @@ spawn path):
 
 ```bash
 cd /path/to/jedna/extension-gems/jedna-tournaments/examples
-mise exec ruby@3.4.4 -- bundle exec ruby ./run_single_game.rb \
+mise exec ruby@4.0.6 -- bundle exec ruby ./run_single_game.rb \
   "python3 -m rl_agent.sb3_opponent --model ../models/jedna_multiplayer_v3.zip" \
   "./simple_agent.rb"
 ```

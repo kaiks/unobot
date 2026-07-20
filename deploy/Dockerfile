@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG RUBY_IMAGE=quay.io/evl.ms/fullstaq-ruby@sha256:fce5b291c13720c64f89e753f1833705bf9c5ac78b060ec87753b0d3ef1f88f9
+ARG RUBY_IMAGE=docker.io/library/ruby@sha256:654c8382a37d73dc8cb7dfe784d711ea82be6aafae2c8fee939149fd80a507c1
 FROM ${RUBY_IMAGE}
 
 ARG JEDNA_REF
@@ -37,7 +37,7 @@ RUN apt-get update -q && \
 WORKDIR ${APP_HOME}
 
 COPY Gemfile Gemfile.lock ./
-RUN gem install bundler -v 2.3.7 --no-document && \
+RUN gem install bundler -v 4.0.16 --no-document && \
     bundle config set frozen true && \
     bundle install && \
     apt-get purge -y git && \
@@ -78,7 +78,7 @@ RUN groupadd --gid 10001 unobot && \
     find /opt/jedna-tournaments -type d -exec chmod 0555 {} + && \
     find /opt/jedna-tournaments -type f -exec chmod 0444 {} + && \
     test ! -e /models/jedna_multiplayer_v3.zip && \
-    ruby --version | grep -F 'ruby 3.4.4' && \
+    ruby --version | grep -F 'ruby 4.0.6' && \
     python3 --version | grep -F 'Python 3.11.2'
 
 USER 10001:10001

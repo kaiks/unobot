@@ -8,7 +8,7 @@ unobot is an intelligent IRC bot that plays the Uno card game. It uses advanced 
 
 ### Ruby Version
 
-The project uses Ruby 3.4.4 (via Docker). Local development can use system Ruby 3.0+.
+The project uses Ruby 4.0.6 for both local development and Docker deployment.
 
 ## Essential Commands
 

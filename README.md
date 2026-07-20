@@ -15,8 +15,7 @@ unobot is a sophisticated Uno game player that uses probability calculations and
 
 ## Requirements
 
-- Ruby 3.0+ (development)
-- Ruby 3.4.4 (Docker deployment)
+- Ruby 4.0.6 for development and Docker deployment
 - Bundler
 
 ## Installation

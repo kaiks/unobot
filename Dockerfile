@@ -1,7 +1,5 @@
-# see https://github.com/evilmartians/fullstaq-ruby-docker
-ARG RUBY_VERSION=3.4.4-jemalloc-bookworm
-
-FROM quay.io/evl.ms/fullstaq-ruby:${RUBY_VERSION}-slim
+ARG RUBY_IMAGE=docker.io/library/ruby@sha256:654c8382a37d73dc8cb7dfe784d711ea82be6aafae2c8fee939149fd80a507c1
+FROM ${RUBY_IMAGE}
 
 # Install git for fetching gems from GitHub
 RUN apt-get update -q && \
@@ -14,7 +12,7 @@ WORKDIR $APP_HOME
 
 # Copy over our application code
 ADD . .
-RUN gem install bundler -v 2.3.7
+RUN gem install bundler -v 4.0.16
 RUN bundle config set without development && bundle install
 
 # Create logs directory for tests
