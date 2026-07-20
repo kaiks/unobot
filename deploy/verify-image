@@ -20,7 +20,7 @@ test "$(sha256sum "$checkpoint" | cut -d ' ' -f 1)" = "$expected"
 
 docker run --rm --platform linux/amd64 --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m "$image" \
-  /bin/sh -c "ruby -e \"abort unless RUBY_VERSION == '4.0.6'\" && python3 -c \"import sys; assert sys.version_info[:3] == (3,11,2)\" && /opt/venv/bin/python -c \"import gymnasium,numpy,sb3_contrib,stable_baselines3,torch; assert torch.__version__ == '2.8.0+cpu'; assert stable_baselines3.__version__ == sb3_contrib.__version__ == '2.7.0'; assert gymnasium.__version__ == '1.2.0'; assert numpy.__version__ == '2.3.5'\""
+  /bin/sh -c "ruby -e \"abort unless RUBY_VERSION == '4.0.6'\" && python3 -c \"import sys; assert sys.version_info[:3] == (3,11,2)\" && /opt/venv/bin/python -c \"import gymnasium,numpy,sb3_contrib,stable_baselines3,torch; assert torch.__version__ == '2.8.0+cpu'; assert stable_baselines3.__version__ == sb3_contrib.__version__ == '2.7.0'; assert gymnasium.__version__ == '1.2.0'; assert numpy.__version__ == '2.3.5'\" && /opt/venv/bin/python -c \"from importlib.metadata import version; expected = {'filelock': '3.31.1', 'fonttools': '4.63.0', 'Jinja2': '3.1.6', 'Pillow': '12.3.0', 'pip': '26.1.2', 'setuptools': '83.0.0'}; assert {name: version(name) for name in expected} == expected\""
 
 docker run --rm --platform linux/amd64 "$image" /bin/sh -c \
   'test "$(id -u)" = 10001 && test ! -e /models/jedna_multiplayer_v3.zip && test ! -d /unobot/.git && test ! -d /unobot/test && test ! -e /opt/jedna-tournaments/examples/rl_agent/train_sb3.py'

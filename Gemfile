@@ -8,8 +8,3 @@ gem 'base64'
 gem 'logger'
 gem 'minitest', '~> 5.25'
 gem 'ostruct'
-
-group :development do
-  gem 'mutant', '~> 0.16'
-  gem 'mutant-minitest'
-end

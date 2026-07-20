@@ -1,0 +1,23 @@
+# Checkpoint-sensitive inference stack. Upgrade these only after loading and
+# exercising the promoted model across every supported player count.
+gymnasium==1.2.0
+numpy==2.3.5
+sb3-contrib==2.7.0
+stable-baselines3==2.7.0
+torch==2.8.0+cpu
+
+# Keep data/plotting APIs within the currently validated release lines while
+# allowing security and bug-fix refreshes during lock generation.
+matplotlib>=3.10.6,<3.11
+pandas>=2.3.2,<3
+
+# Security-patched support packages. These are pinned explicitly because the
+# PyTorch index mirrors older versions that a cross-index resolver may select.
+filelock==3.31.1
+fonttools==4.63.0
+Jinja2==3.1.6
+Pillow==12.3.0
+
+# Packaging tools are part of the immutable image and are audited with it.
+pip==26.1.2
+setuptools==83.0.0

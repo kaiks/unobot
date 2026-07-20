@@ -25,9 +25,6 @@ docker run --rm unobot sh -c "cd test && ruby basic.rb"
 docker run --rm unobot sh -c "cd test && ruby components_test.rb"
 docker run --rm unobot sh -c "cd test && ruby enemy_hand_tracking_test.rb"
 docker run --rm unobot sh -c "cd test && ruby uno_ai_test.rb"
-
-# Run mutation tests locally
-bundle exec mutant run
 ```
 
 ### Docker Deployment

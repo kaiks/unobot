@@ -52,6 +52,7 @@ RUN python3 -m venv /opt/venv && \
       -r /tmp/requirements-neural.lock && \
     /opt/venv/bin/pip check && \
     /opt/venv/bin/python -c "import gymnasium, numpy, sb3_contrib, stable_baselines3, torch; assert torch.__version__ == '2.8.0+cpu'; assert stable_baselines3.__version__ == sb3_contrib.__version__ == '2.7.0'; assert gymnasium.__version__ == '1.2.0'; assert numpy.__version__ == '2.3.5'" && \
+    /opt/venv/bin/python -c "from importlib.metadata import version; expected = {'filelock': '3.31.1', 'fonttools': '4.63.0', 'Jinja2': '3.1.6', 'Pillow': '12.3.0', 'pip': '26.1.2', 'setuptools': '83.0.0'}; assert {name: version(name) for name in expected} == expected" && \
     rm /tmp/requirements-neural.lock
 
 # The named context contains exactly these six files plus LICENSE, archived

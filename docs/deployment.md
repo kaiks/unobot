@@ -41,7 +41,10 @@ The deployment pins:
 - Debian Python 3.11.2, `tini` 0.19.0, and installation package versions;
 - Torch 2.8.0+cpu, Stable-Baselines3 2.7.0, sb3-contrib 2.7.0,
   Gymnasium 1.2.0, NumPy 2.3.5, and every resolved Python dependency in
-  `deploy/requirements-neural.lock`, with target-wheel SHA-256 verification.
+  `deploy/requirements-neural.lock`, with target-wheel SHA-256 verification;
+- security-patched filelock 3.31.1, fonttools 4.63.0, Jinja2 3.1.6,
+  Pillow 12.3.0, pip 26.1.2, and setuptools 83.0.0. Direct constraints and
+  compatibility bands live in `deploy/requirements-neural.in`.
 
 The build is specifically `linux/amd64`: the base digest, Debian package
 versions, and Python wheel hashes do not claim another architecture. Debian
