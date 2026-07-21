@@ -25,7 +25,8 @@ docker run --rm --platform linux/amd64 --read-only \
 docker run --rm --platform linux/amd64 "$image" /bin/sh -c \
   'test "$(id -u)" = 10001 && test ! -e /models/jedna_multiplayer_v3.zip && test ! -d /unobot/.git && test ! -d /unobot/test && test ! -e /opt/jedna-tournaments/examples/rl_agent/train_sb3.py'
 
-requests=$(ruby -rjson -e '
+requests=$(docker run --rm --platform linux/amd64 --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m "$image" ruby -rjson -e '
   (2..10).each do |players|
     others = (2..players).map { |index| { id: "player#{index}", card_count: index } }
     puts JSON.generate(type: "request_action", state: {
@@ -42,5 +43,8 @@ responses=$(printf '%s\n' "$requests" | \
     -e UNO_STRATEGY=Neural "$image" \
     /bin/sh -c 'cd /opt/jedna-tournaments/examples && exec /opt/venv/bin/python -m rl_agent.sb3_opponent --model /models/jedna_multiplayer_v3.zip')
 
-printf '%s\n' "$responses" | ruby -rjson -e 'lines = STDIN.readlines(chomp: true); abort unless lines.length == 9; abort unless lines.map { |line| JSON.parse(line) }.all? { |action| action == { "action" => "draw" } }'
+printf '%s\n' "$responses" | \
+  docker run --rm -i --platform linux/amd64 --read-only \
+    --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m "$image" ruby -rjson -e \
+    'lines = STDIN.readlines(chomp: true); abort unless lines.length == 9; abort unless lines.map { |line| JSON.parse(line) }.all? { |action| action == { "action" => "draw" } }'
 printf '%s\n' "$responses"
