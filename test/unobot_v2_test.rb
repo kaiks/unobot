@@ -278,6 +278,21 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal [5, 2], request.other_players.map(&:card_count)
   end
 
+  def test_resync_can_space_human_status_commands_for_public_irc
+    sent = []
+    delays = []
+    adapter = UnobotV2::Human::Adapter.new(
+      channel: CHANNEL, own_nick: 'Alice', host_nicks: ['Host'],
+      transport: ->(target, line) { sent << [target, line] },
+      resync_delay: 1.25, sleeper: ->(delay) { delays << delay }
+    )
+
+    adapter.resync!('initial_join')
+
+    assert_equal [[CHANNEL, 'us'], [CHANNEL, 'ca']], sent
+    assert_equal [1.25], delays
+  end
+
   def test_real_transcript_fixture_replays_in_scope_order
     fixture_path = File.expand_path('fixtures/human_protocol_v1/transcripts.json', __dir__)
     events = JSON.parse(File.read(fixture_path)).fetch('normal_start_draw_pass')

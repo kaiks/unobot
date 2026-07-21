@@ -31,13 +31,14 @@ module UnobotV2
         messaging: Configuration.messaging(env), strategy: strategy,
         channels: channels, own_nick: own_nick, host_nicks: host_nicks,
         transport: transport,
-        fallback_enabled: Configuration.fallback_enabled?(env), **options
+        fallback_enabled: Configuration.fallback_enabled?(env),
+        human_resync_delay: Configuration.human_resync_delay(env), **options
       )
     end
 
     def initialize(messaging:, strategy:, channels:, own_nick:, host_nicks:, transport:,
                    queue_capacity: 1_024, fallback_enabled: false, on_error: nil,
-                   on_submission: nil)
+                   on_submission: nil, human_resync_delay: 0)
       raise ArgumentError, 'strategy must respond to decide' unless strategy.respond_to?(:decide)
 
       @mode = Configuration.normalize_messaging(messaging)
@@ -50,6 +51,10 @@ module UnobotV2
       @transport = transport
       @queue_capacity = Integer(queue_capacity)
       @fallback_enabled = !!fallback_enabled
+      @human_resync_delay = Float(human_resync_delay)
+      unless @human_resync_delay.finite? && @human_resync_delay >= 0 && @human_resync_delay <= 10
+        raise ArgumentError, 'human resync delay must be between 0 and 10 seconds'
+      end
       @on_error = on_error
       @on_submission = on_submission
       @callback_errors = Queue.new
@@ -210,6 +215,7 @@ module UnobotV2
             mode: 'human', channel: channel, own_nick: @own_nick,
             host_nicks: @host_nicks, transport: @transport,
             on_request: callback,
+            resync_delay: @human_resync_delay,
             on_lifecycle: ->(kind, request, reason) { strategy_lifecycle(kind, request, reason) }
           )
         end

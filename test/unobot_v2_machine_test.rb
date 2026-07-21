@@ -1061,8 +1061,14 @@ class UnobotV2RuntimeSelectionTest < Minitest::Test
     assert_equal 'machine', UnobotV2::Configuration.messaging('UNO_MESSAGING' => 'machine')
     assert_equal true,
                  UnobotV2::Configuration.fallback_enabled?('UNO_MACHINE_HUMAN_FALLBACK' => 'yes')
+    assert_equal 0.0, UnobotV2::Configuration.human_resync_delay({})
+    assert_equal 1.25,
+                 UnobotV2::Configuration.human_resync_delay('UNO_HUMAN_RESYNC_DELAY' => '1.25')
     assert_raises(UnobotV2::Configuration::Error) do
       UnobotV2::Configuration.messaging('UNO_MESSAGING' => 'automatic')
+    end
+    assert_raises(UnobotV2::Configuration::Error) do
+      UnobotV2::Configuration.human_resync_delay('UNO_HUMAN_RESYNC_DELAY' => '-1')
     end
     assert_raises(UnobotV2::Configuration::Error) do
       UnobotV2::Runtime.from_env(

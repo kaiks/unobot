@@ -13,12 +13,18 @@ module UnobotV2
       attr_writer :lifecycle_token, :token_validator
 
       def initialize(channel:, own_nick:, host_nicks:, transport:, on_request: nil,
-                     on_lifecycle: nil, reducer: nil, encoder: ActionEncoder.new)
+                     on_lifecycle: nil, reducer: nil, encoder: ActionEncoder.new,
+                     resync_delay: 0, sleeper: Kernel.method(:sleep))
         @transport = transport
         @on_request = on_request
         @on_lifecycle = on_lifecycle
         @reducer = reducer || Reducer.new(channel: channel, own_nick: own_nick, host_nicks: host_nicks)
         @encoder = encoder
+        @resync_delay = Float(resync_delay)
+        unless @resync_delay.finite? && @resync_delay >= 0 && @resync_delay <= 10
+          raise ArgumentError, 'resync delay must be between 0 and 10 seconds'
+        end
+        @sleeper = sleeper
         @last_decision_id = nil
         @active_request = nil
         @submitted_decision_id = nil
@@ -104,7 +110,11 @@ module UnobotV2
         @active_request = nil
         @active_lifecycle_token = nil
         @submitted_decision_id = nil
-        reducer.resync_commands.each { |command| @transport.call(reducer.channel, command) }
+        commands = reducer.resync_commands
+        commands.each_with_index do |command, index|
+          @transport.call(reducer.channel, command)
+          @sleeper.call(@resync_delay) if @resync_delay.positive? && index < commands.length - 1
+        end
       end
 
       private

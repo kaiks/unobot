@@ -45,6 +45,15 @@ module UnobotV2
       boolean(env.fetch('UNO_AUTOJOIN', 'false'), 'UNO_AUTOJOIN')
     end
 
+    def human_resync_delay(env = ENV)
+      value = Float(env.fetch('UNO_HUMAN_RESYNC_DELAY', '0'))
+      return value if value.finite? && value >= 0 && value <= 10
+
+      raise Error, 'UNO_HUMAN_RESYNC_DELAY must be between 0 and 10 seconds'
+    rescue ArgumentError, TypeError
+      raise Error, 'UNO_HUMAN_RESYNC_DELAY must be between 0 and 10 seconds'
+    end
+
     def boolean(value, label)
       value = value.to_s.downcase
       return true if TRUE_VALUES.include?(value)
