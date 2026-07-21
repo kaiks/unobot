@@ -326,7 +326,7 @@ module UnobotV2
         unless @players.empty? || pairs.map(&:first).sort == @players.sort
           return unsafe_reduction('inconsistent_player_count')
         end
-        @players = pairs.map(&:first) if @players.empty?
+        @players = pairs.map(&:first)
         @counts.merge!(pairs.to_h)
         @facts[:players] = 'exact'
         @unsafe_reasons.delete('no_complete_state') if continuously_complete?

@@ -265,6 +265,19 @@ class UnobotV2HumanAdapterTest < Minitest::Test
     assert_equal (2..10).to_a, request.other_players.map(&:card_count)
   end
 
+  def test_public_card_count_replaces_shuffled_join_order
+    @adapter.receive(event('Alice joins the game'))
+    @adapter.receive(event('Bob joins the game'))
+    @adapter.receive(event('Carol joins the game'))
+    @adapter.receive(event('Card count: Alice 3, Carol 5, Bob 2'))
+    @adapter.receive(event("#{RED_5} #{GREEN_3} #{WD4}", private: true, recipient: 'Alice'))
+
+    request = @adapter.receive(event("Alice's turn. Top card: #{RED_7}")).request
+
+    assert_equal %w[Carol Bob], request.other_players.map(&:id)
+    assert_equal [5, 2], request.other_players.map(&:card_count)
+  end
+
   def test_real_transcript_fixture_replays_in_scope_order
     fixture_path = File.expand_path('fixtures/human_protocol_v1/transcripts.json', __dir__)
     events = JSON.parse(File.read(fixture_path)).fetch('normal_start_draw_pass')
